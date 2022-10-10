@@ -1069,8 +1069,19 @@ class Linear(FlowCircuitODE):
     recommended_param_groups = [recommended_param_ranges]
 
     def forward(self, t, z, **kwargs):
+
         A = torch.tensor([[self.params[0], self.params[1]],[self.params[2], self.params[3]]])
-        return torch.einsum('ij,bj->bi', A,z)
+        return torch.einsum('ij,...j', A,z)
+
+    def get_polynomial_representation(self):
+        dx = pd.DataFrame(0.0, index=['linear'], columns=self.polynomial_terms)
+        dy = pd.DataFrame(0.0, index=['linear'], columns=self.polynomial_terms)
+        params = [p.numpy() for p in self.params]
+        dx.loc['linear']['$x_0$'] = params[0]
+        dx.loc['linear']['$x_1$'] = params[1]
+        dy.loc['linear']['$x_0$'] = params[2]
+        dy.loc['linear']['$x_1$'] = params[3]
+        return dx, dy
 
 class Conservative(FlowCircuitODE):
  
@@ -1152,10 +1163,13 @@ class Polynomial(FlowCircuitODE):
 
     def forward(self, t, z, **kwargs):
         params = self.params.reshape(-1, self.dim)
+        z_shape = z.shape
+        z = z.reshape(-1,self.dim)
         library, _ = sindy_library(z, self.poly_order,
                                    include_sine=False, include_exp=False)
         
         zdot = torch.einsum('sl,ld->sd', library.to(params.device).float(), params.float())
+        zdot = zdot.reshape(*z_shape)
     
         # xdot = data[:, 0]
         # ydot = data[:, 1]

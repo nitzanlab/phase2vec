@@ -15,7 +15,7 @@ from src.utils import command_with_config, ensure_dir, get_command_defaults
 from src.utils import write_yaml, read_yaml, timestamp, strtuple_to_list, str_to_list, get_last_config
 from src.data import CircuitFamily
 from sklearn.model_selection import train_test_split
-
+import torch
 
 # Here we will monkey-patch click Option __init__
 # in order to force showing default values for all options
@@ -35,8 +35,6 @@ click.core.Option.__init__ = new_init  # type: ignore
 def cli():
     pass
 
-
-
 ################################################## Single Experiment ###################################################
 
 @cli.command(name="generate-dataset", cls=command_with_config('config_file'), context_settings=dict(ignore_unknown_options=True, allow_extra_args=True), 
@@ -47,9 +45,10 @@ help="Generates a data set of vector fields.")
 @click.option('--num-samples', '-m', type=int, default=1000)
 @click.option('--samplers', '-sp', type=str, multiple=True, default=['uniform'])
 @click.option('--class-props', '-c', type=float, multiple=True, default=[1.0])
-@click.option('--config-file', '-co', type=click.Path())
-@click.pass_context
-def generate_dataset(data_dir, data_set_name, system_names, num_samples, samplers, class_props, config_file):
+@click.option('--test-size', '-t', type=float, default=.25)
+@click.option('--config-file', type=click.Path())
+#@click.pass_context
+def generate_dataset(data_dir, data_set_name, system_names, num_samples, samplers, class_props, test_size, config_file):
     """
     Generates train and test data for one data set
 
@@ -63,11 +62,16 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
 
     """
 
+    # Living dangerously
+    import warnings
+    warnings.filterwarnings("ignore")
     # TODO: For now, no control here over param ranges, min or max dims. Just use cf defaults
     # TODO: Add noise params
     # TODO: Add control for poly params
 
     save_dir = os.path.join(data_dir, data_set_name)
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
 
     all_data   = []
     all_labels = []
@@ -79,25 +83,24 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
 
     for d, system_name in enumerate(system_names):
 
-        print(f'Generating {data_name} data.')
+        print(f'Generating {system_name} data.')
 
         sampler       = samplers[d]
-        cf            = CircuitFamily(data_name=system_name, param_ranges=param_ranges, default_sampler=sampler)
+        cf            = CircuitFamily(data_name=system_name, default_sampler=sampler)
         class_samples = int(class_props[d] * num_samples)
 
-        linear    = (data_name == 'linear')
-        set_label = (data_name != 'polynomial')
+        linear       = (system_name == 'linear')
+        polynomial    = (system_name == 'polynomial')
 
-        gen_pars = cf.par_sample(class_samples)
-        systems  = [cf.generate_model(pr, linear=linear, set_label=set_label) for pr in gen_pars]
+        gen_pars = cf.param_sampler(class_samples)
+        systems  = [cf.generate_model(pr, linear=linear, polynomial=polynomial) for pr in gen_pars]
         data     = [system.forward(0,cf.L) for system in systems]
         labels   = [system.label + cum_labels_per_group[d] for system in systems]
 
         if system_name in ['simple_oscillator', 'alon']:
-            save_pars = [system.fit_polynomial_representation() for system in systems]
+            save_pars = [system.fit_polynomial_representation(poly_order=3) for system in systems]
         else:
             save_pars = [system.get_polynomial_representation() for system in systems]
-
 
         save_pars = [torch.cat((torch.tensor(dx.to_numpy()), torch.tensor(dy.to_numpy()))).transpose(1,0).float() for (dx, dy) in save_pars]
 
@@ -105,25 +108,14 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
         all_pars   += save_pars
         all_labels += labels
 
+    all_data   = torch.stack(all_data).numpy().transpose(0,3,1,2)
+    all_pars   = torch.stack(all_pars).numpy()
+    all_labels = np.array(all_labels)
+
     split = train_test_split(all_data, all_labels, all_pars, test_size=test_size, stratify=all_labels)
 
     for dt, nm in zip(split, ['X_train', 'X_test', 'y_train', 'y_test', 'p_train', 'p_test']):
         np.save(os.path.join(save_dir, nm + '.npy'), dt)
-
-
-   # param_ranges = strtuple_to_list(param_ranges)
-   # param_ranges = param_ranges * times_param_ranges
-   # min_dims = str_to_list(min_dims)
-   # max_dims = str_to_list(max_dims)
-
-   # kwargs = {ctx.args[i][2:].replace('-','_'):ctx.args[i+1] for i in range(0,len(ctx.args),2)}
-   # cf = CircuitFamily(data_name=data_name, param_ranges=param_ranges, device=device, data_dir=save_dir, min_dims=min_dims, max_dims=max_dims, **kwargs)
-   # cf.make_data(num_samples=num_samples)
-   # data_config = os.path.join(save_dir, 'data_config.yaml')
-   # write_yaml(data_config, cf.data_info)
-    print('Successfully generated data for {}. Config file: {}'.format(data_name, data_config))
-
-
 
 @cli.command(name='train', cls=command_with_config('config_file'), help='train a VAE to learn reduced models')
 @click.argument("data-config", type=click.Path())
@@ -199,14 +191,19 @@ def call_train(data_config, exp_name, model_save_dir, log_dir, config_file, **kw
     write_yaml(results_config, results)
     print('Train/test observables: {}'.format(results_config))
 
+@cli.command(name="generate-data-config", help="Generates a configuration file that holds editable options for a dataset.")
+@click.option('--output-file', '-o', type=click.Path(), default='data-config.yaml')
+def generate_train_config(output_file):
+    output_file = os.path.abspath(output_file)
+    write_yaml(output_file, get_command_defaults(generate_dataset))
+    print(f'Successfully generated train config file at "{output_file}".')
+
 @cli.command(name="generate-train-config", help="Generates a configuration file that holds editable options for training parameters.")
 @click.option('--output-file', '-o', type=click.Path(), default='train-config.yaml')
 def generate_train_config(output_file):
     output_file = os.path.abspath(output_file)
     write_yaml(output_file, get_command_defaults(call_train))
     print(f'Successfully generated train config file at "{output_file}".')
-
-
 
 @cli.command(name='visualize', help='visualize the results of training')
 @click.argument("data-config", type=click.Path())

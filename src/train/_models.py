@@ -5,7 +5,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchdiffeq import odeint, odeint_adjoint
 from ._layers import convNd
-from skdim import id as ID
 import pdb
 
 from pl_bolts.models.autoencoders.components import resnet18_decoder, resnet18_encoder
@@ -109,11 +108,6 @@ class VAE(nn.Module):
         h = F.relu(self.fc5(h))
         return self.fc6(h)
 
-    def id(self, x, n_neighbors=100):
-        latent, _ = self.encode(x)
-        latent = latent.detach().cpu().numpy()
-        return ID.DANCo().fit(latent), ID.lPCA().fit_pw(latent, n_neighbors=n_neighbors, n_jobs=1)
-
     def forward(self, x, y=None, return_activations=False):
         in_shape = x.shape
         if len(x.shape) > 2:
@@ -189,11 +183,6 @@ class Conv2dVAE(nn.Module):
         x = F.relu(self.decConv1(x))
         x = self.decConv2(x)
         return x
-
-    def id(self, x, n_neighbors=100):
-        latent, _ = self.encode(x)
-        latent = latent.detach().cpu().numpy()
-        return ID.DANCo().fit(latent), ID.lPCA().fit_pw(latent, n_neighbors=n_neighbors, n_jobs=1)
 
     def forward(self, x, y=None, return_activations=False):
         self.return_activations = return_activations
@@ -543,11 +532,6 @@ class Conv2dParAE(nn.Module):
         # The generated output is the same size of the original input
         return self.dec(z)
 
-    def id(self, x, n_neighbors=100):
-        latent, _ = self.encode(x)
-        latent = latent.detach().cpu().numpy()
-        return ID.DANCo().fit(latent), ID.lPCA().fit_pw(latent, n_neighbors=n_neighbors, n_jobs=1)
-
     def forward(self, x, y=None, return_activations=False):
         self.return_activations = return_activations
         # The entire pipeline of the VAE: encoder -> reparameterization -> decoder
@@ -641,11 +625,6 @@ class Conv3dVAE(nn.Module):
         x = F.relu(self.decConv3(x))
         x = self.decConv4(x)
         return x
-
-    def id(self, x, n_neighbors=100):
-        latent, _ = self.encode(x)
-        latent = latent.detach().cpu().numpy()
-        return ID.DANCo().fit(latent), ID.lPCA().fit_pw(latent, n_neighbors=n_neighbors, n_jobs=1)
 
     def forward(self, x, return_activations=False):
         self.return_activations = return_activations
@@ -747,11 +726,6 @@ class VGGVAE(nn.Module):
         # return F.sigmoid(dec)
         return dec
 
-    def id(self, x, n_neighbors=100):
-        latent, _ = self.encode(x)
-        latent = latent.detach().cpu().numpy()
-        return ID.DANCo().fit(latent), ID.lPCA().fit_pw(latent, n_neighbors=n_neighbors, n_jobs=1)
-
     def forward(self, x, return_activations=False):
         self.return_activations = return_activations
         mu, log_var = self.encode(x)
@@ -845,11 +819,6 @@ class ResVAE(nn.Module):
         # return F.sigmoid(dec)
         return dec
 
-    def id(self, x, n_neighbors=100):
-        latent, _ = self.encode(x)
-        latent = latent.detach().cpu().numpy()
-        return ID.DANCo().fit(latent), ID.lPCA().fit_pw(latent, n_neighbors=n_neighbors, n_jobs=1)
-
     def forward(self, x, return_activations=False):
         self.return_activations = return_activations
         mu, log_var = self.encode(x)
@@ -930,11 +899,6 @@ class Conv3dParAE(nn.Module):
         # z is fed back into a fully-connected layers and then into two transpose convolutional layers
         # The generated output is the same size of the original input
         return self.decoder(z)
-
-    def id(self, x, n_neighbors=100):
-        latent, _ = self.encode(x)
-        latent = latent.detach().cpu().numpy()
-        return ID.DANCo().fit(latent), ID.lPCA().fit_pw(latent, n_neighbors=n_neighbors, n_jobs=1)
 
     def forward(self, x, return_activations=False):
         self.return_activations = return_activations
@@ -1036,11 +1000,6 @@ class ConvNdParAE(nn.Module):
         # The generated output is the same size of the original input
         return self.decoder(z)
 
-    def id(self, x, n_neighbors=100):
-        latent, _ = self.encode(x)
-        latent = latent.detach().cpu().numpy()
-        return ID.DANCo().fit(latent), ID.lPCA().fit_pw(latent, n_neighbors=n_neighbors, n_jobs=1)
-
     def forward(self, x, return_activations=False):
         self.return_activations = return_activations
         # The entire pipeline of the VAE: encoder -> reparameterization -> decoder
@@ -1141,11 +1100,6 @@ class ResParAE(nn.Module):
         dec = self.dec(z)
         # return F.sigmoid(dec)
         return dec
-
-    def id(self, x, n_neighbors=100):
-        latent, _ = self.encode(x)
-        latent = latent.detach().cpu().numpy()
-        return self.global_id.fit(latent), self.local_id.fit_pw(latent, n_neighbors=n_neighbors, n_jobs=1)
 
     def forward(self, x, y=None,return_activations=False):
         self.return_activations = return_activations
