@@ -133,7 +133,7 @@ class CircuitFamily():
         else:
             raise ValueError('Param sampler not recognized.')
        
-    def set_label(self, model, params, linear=False):
+    def set_label(self, model, params, linear=False, polynomial=False):
         if linear:
             A = np.array([[params[0],params[1]],[params[2], params[3]]])
             tr = np.trace(A)
@@ -172,6 +172,8 @@ class CircuitFamily():
                 label = -1
             model.label = label
 
+        elif polynomial:
+            model.label = -1
         else:
             for g, gp in enumerate(self.param_groups):
                 if np.all([par >= gp[p][0] and par <= gp[p][1] for p, par in enumerate(params)]): 
