@@ -10,7 +10,7 @@ conda create -n phase2vec python=3.8
 
 Activate the newly created environment:
 ```
-conda activate flow-encoding
+conda activate phase2vec
 ```
 
 Install this repo
@@ -25,6 +25,6 @@ OR for *development* usage:
 git clone https://github.com/nitzanlab/phase2vec.git     # if you like to use git over https
 git clone ssh://git@github.com/nitzanlab/phase2vec.git   # if you like to use git over ssh
 
-pip install -e flow-encoding
+pip install -e phase2vec
 ```
 
