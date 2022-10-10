@@ -27,4 +27,3 @@ git clone ssh://git@github.com/nitzanlab/phase2vec.git   # if you like to use gi
 
 pip install -e phase2vec
 ```
-
