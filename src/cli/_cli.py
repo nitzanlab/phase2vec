@@ -44,11 +44,11 @@ help="Generates a data set of vector fields.")
 @click.option('--system-names', '-s', type=str, multiple=True, default=['simple_oscillator'])
 @click.option('--num-samples', '-m', type=int, default=1000)
 @click.option('--samplers', '-sp', type=str, multiple=True, default=['uniform'])
-@click.option('--class-props', '-c', type=float, multiple=True, default=[1.0])
+@click.option('--system-props', '-c', type=float, multiple=True, default=[1.0])
 @click.option('--test-size', '-t', type=float, default=.25)
 @click.option('--config-file', type=click.Path())
 #@click.pass_context
-def generate_dataset(data_dir, data_set_name, system_names, num_samples, samplers, class_props, test_size, config_file):
+def generate_dataset(data_dir, data_set_name, system_names, num_samples, samplers, system_props, test_size, config_file):
     """
     Generates train and test data for one data set
 
@@ -58,7 +58,8 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
     system_names (list of str): names of data to generate
     num_samples (int): number of total samples to generate
     samplers (list of strings): for each system, a string denoting the type of sampler used. 
-    class_props (list of floats): for each system, a float controlling proportion of total data this system will comprise.
+    system_props (list of floats): for each system, a float controlling proportion of total data this system will comprise.
+    test_size (float): proportion in (0,1) of data allocated to testing set
 
     """
 
@@ -81,32 +82,44 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
     num_labels_per_group = [len(cf.param_groups) for cf in cfs]
     cum_labels_per_group = [0] + list(np.cumsum(num_labels_per_group))[:-1]
 
+    # For each system
     for d, system_name in enumerate(system_names):
 
         print(f'Generating {system_name} data.')
 
         sampler       = samplers[d]
         cf            = CircuitFamily(data_name=system_name, default_sampler=sampler)
-        class_samples = int(class_props[d] * num_samples)
+        num_classes   = cf.num_classes
 
-        linear       = (system_name == 'linear')
-        polynomial    = (system_name == 'polynomial')
+        system_samples = int(system_props[d] * num_samples)
+        class_samples  = int(system_samples / float(num_classes))
 
-        gen_pars = cf.param_sampler(class_samples)
-        systems  = [cf.generate_model(pr, linear=linear, polynomial=polynomial) for pr in gen_pars]
-        data     = [system.forward(0,cf.L) for system in systems]
-        labels   = [system.label + cum_labels_per_group[d] for system in systems]
+        # For each class in the system
+        for c in range(num_classes):
+            current_exemplars = 0
+            # Until you have the right number of exemplars from this class
+            while current_exemplars < class_samples:
+                gen_par = cf.param_sampler(1)[0]
+                system  = cf.generate_model(gen_par)
+                if system.label != c:
+                    # If wrong label, get another sample
+                    continue
+                else:
+                    current_exemplars += 1
+                    datum     = system.forward(0,cf.L)
+                    label     = system.label + cum_labels_per_group[d]
 
-        if system_name in ['simple_oscillator', 'alon']:
-            save_pars = [system.fit_polynomial_representation(poly_order=3) for system in systems]
-        else:
-            save_pars = [system.get_polynomial_representation() for system in systems]
+                    # If system doesn't have a closed from in the dictionary, approximate its coefficients with least squares
+                    if system_name in ['simple_oscillator', 'alon']:
+                        dx, dy = system.fit_polynomial_representation(poly_order=3)
+                    else:
+                        dx, dy = system.get_polynomial_representation()
 
-        save_pars = [torch.cat((torch.tensor(dx.to_numpy()), torch.tensor(dy.to_numpy()))).transpose(1,0).float() for (dx, dy) in save_pars]
+                    save_pars = torch.cat((torch.tensor(dx.to_numpy()), torch.tensor(dy.to_numpy()))).transpose(1,0).float()
 
-        all_data   += data
-        all_pars   += save_pars
-        all_labels += labels
+                    all_data.append(datum)
+                    all_pars.append(save_pars)
+                    all_labels.append(label)
 
     all_data   = torch.stack(all_data).numpy().transpose(0,3,1,2)
     all_pars   = torch.stack(all_pars).numpy()

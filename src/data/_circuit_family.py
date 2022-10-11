@@ -105,6 +105,14 @@ class CircuitFamily():
         self.min_dims = DE.min_dims if min_dims is None else min_dims
         self.max_dims = DE.max_dims if max_dims is None else max_dims
 
+        # Num classes
+        if self.data_name == 'linear':
+            self.num_classes = 5
+        elif self.data_name == 'polynomial':
+            self.num_classes = 1
+        else:
+            self.num_classes = len(self.param_groups)
+
         # general DE params
         self.device = device
         params = self.params_random(1)
@@ -173,7 +181,7 @@ class CircuitFamily():
             model.label = label
 
         elif polynomial:
-            model.label = -1
+            model.label = 0
         else:
             for g, gp in enumerate(self.param_groups):
                 if np.all([par >= gp[p][0] and par <= gp[p][1] for p, par in enumerate(params)]): 
@@ -191,7 +199,7 @@ class CircuitFamily():
         else:
             model = self.DE(params=torch.tensor(params), **kwargs)
             if set_label:
-                self.set_label(model, params, linear=(self.data_name=='linear'))
+                self.set_label(model, params, linear=(self.data_name=='linear'), polynomial=(self.data_name=='polynomial'))
         return model
 
     def generate_flow(self, params, **kwargs):
