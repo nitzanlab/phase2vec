@@ -2,7 +2,7 @@ import os
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from src.data import CircuitFamilyDataset
+#from src.data import SystemFamilyDataset
 
 def get_optimizer(optimizer_name, model_params, lr):
     """
@@ -20,13 +20,13 @@ def get_optimizer(optimizer_name, model_params, lr):
     return optimizer
 
 
-def load_data(data_dir, tt, **kwargs):
-    """
-    Get dataloader
-    """
-    tt_dataset = CircuitFamilyDataset(os.path.join(data_dir, tt, '0'))
-    tt_loader = torch.utils.data.DataLoader(dataset=tt_dataset, **kwargs)
-    return tt_loader
+#def load_data(data_dir, tt, **kwargs):
+#    """
+#    Get dataloader
+#    """
+#    tt_dataset = SystemFamilyDataset(os.path.join(data_dir, tt, '0'))
+#    tt_loader = torch.utils.data.DataLoader(dataset=tt_dataset, **kwargs)
+#    return tt_loader
 
 
 def to_batches(loader, val_samples, dim, dx):
@@ -58,26 +58,26 @@ def clamp_params(params, ranges):
         params[:, d] = torch.sigmoid(params[:, d]) * (rg[1] - rg[0]) + rg[0]
     return params
 
-def get_flows(cf, ndim, DE_params, pde):
+def get_flows(sf, ndim, DE_params, pde):
     """
     Flow generator
     """
     permuted_dims = [ndim] + list(range(ndim))
     if not pde:
         # Get ODE vector field on mesh
-        # parDEs = [torch.tensor(cf.generate_flow(params=dep, train=False)) for dep in DE_params]
+        # parDEs = [torch.tensor(sf.generate_flow(params=dep, train=False)) for dep in DE_params]
         # flows = torch.stack([parDE.permute(*permuted_dims) for parDE in parDEs])
-        kwargs = cf.data_info
+        kwargs = sf.data_info
         kwargs['train'] = False
-        parDEs = [cf.DE(params=dep, **kwargs) for dep in DE_params]
-        flows = torch.stack([parDE.forward(0, torch.tensor(cf.L)).permute(*permuted_dims) for parDE in parDEs])
+        parDEs = [sf.DE(params=dep, **kwargs) for dep in DE_params]
+        flows = torch.stack([parDE.forward(0, torch.tensor(sf.L)).permute(*permuted_dims) for parDE in parDEs])
     else:
         # Get PDE steady state
         # TODO: handle!
-        parDEs = [cf.generate_model(cf.num_lattice, params=DE_params, train=False) for dep in DE_params]
+        parDEs = [sf.generate_model(sf.num_lattice, params=DE_params, train=False) for dep in DE_params]
         flows = torch.stack(
             [parDE.run(2000, alpha=.1, noise_magnitude=0.2).permute(*permuted_dims) for parDE in parDEs])
-        flows = flows[-1, ...].reshape(-1, cf.num_lattice, cf.num_lattice, 2)
+        flows = flows[-1, ...].reshape(-1, sf.num_lattice, sf.num_lattice, 2)
     return flows, parDEs
 
 def plot_flows(recon_data, data, recon_pars, pars, L, pad, pde): #TODO: move from here

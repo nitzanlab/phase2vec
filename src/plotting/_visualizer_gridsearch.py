@@ -7,7 +7,7 @@ from src.plotting._visualizer import Visualizer
 plt.ioff()
 plt.style.use('ggplot')
 
-from src.data import CircuitFamily
+from src.data import SystemFamily
 from src.utils import ensure_dir, read_yaml
 
 
@@ -29,9 +29,9 @@ class VisualizerGridsearch(object):
         self.gs_params_info = gs_info['parameters']
         self.gs_scans_info = gs_info['scans'][0]['scan']
         self.data_info = read_yaml(self.gs_params_info['data_config'])
-        self.cf = CircuitFamily(**self.data_info)
+        self.sf = SystemFamily(**self.data_info)
 
-        self.param_ranges = self.cf.param_ranges
+        self.param_ranges = self.sf.param_ranges
         self.gs_fig_dir = os.path.join(self.fig_save_dir, self.gs_name)
         ensure_dir(self.gs_fig_dir)
 
@@ -68,7 +68,7 @@ class VisualizerGridsearch(object):
             return
         for exp_name, train_info in self.train_infos.items():
             #TODO: edit save dir?
-            self.visualizers[exp_name] = Visualizer(self.cf, train_info, fig_save_dir=self.fig_save_dir, tt=self.tt, num_samples=self.num_samples, **self.kwargs)
+            self.visualizers[exp_name] = Visualizer(self.sf, train_info, fig_save_dir=self.fig_save_dir, tt=self.tt, num_samples=self.num_samples, **self.kwargs)
 
 
     def visualize_multi(self, **kwargs):

@@ -18,12 +18,12 @@ from src.data._polynomials import sindy_library, library_size
 import pdb
 from time import time
 from sklearn import linear_model
-from src.utils._utils import curl
+from src.data._utils import curl
 
 
-class FlowCircuitODE(torch.nn.Module):
+class FlowSystemODE(torch.nn.Module):
     """
-    Super class for all circuits of Ordinary Differential Equations.
+    Super class for all systems of Ordinary Differential Equations.
     Default is a system with one parameter over two dimensions
     """
     
@@ -52,7 +52,7 @@ class FlowCircuitODE(torch.nn.Module):
         """
         Initialize ODE. Defaults to a 2-dimensional system with a single parameter
 
-        params - torch array allocated for circuit params (default: 0)
+        params - torch array allocated for system params (default: 0)
         labels - labels of the params (default: ['x', 'y'])
         adjoint - torch solver for differential equations (default: using odeint)
         solver_method - solver method (default: 'euler')
@@ -84,7 +84,7 @@ class FlowCircuitODE(torch.nn.Module):
 
     def run(self, T, alpha, init=None,return_summed=False):
         """
-        Run circuit
+        Run system
 
         T - length of run
         alpha - resolution
@@ -220,7 +220,7 @@ class FlowCircuitODE(torch.nn.Module):
 
     def params_str(self, s=''):
         """
-        Returns a string representation of the circuit's parameters
+        Returns a string representation of the system's parameters
         """
         if self.eq_string:
             s = s + self.eq_string % tuple(self.params)
@@ -250,7 +250,7 @@ class FlowCircuitODE(torch.nn.Module):
 
     def get_info(self, exclude=exclude):
         """
-        Return dictionary with the configuration of the circuit
+        Return dictionary with the configuration of the system
         """
         data_info = self.__dict__
         data_info = {k: v for k, v in data_info.items() if not k.startswith('_')}
@@ -267,7 +267,7 @@ class FlowCircuitODE(torch.nn.Module):
 
     def fit_polynomial_representation(self, poly_order=None, fit_with='lstsq', return_rt=False,**kwargs):
         """
-        Return the polynomial representations of the circuit
+        Return the polynomial representations of the system
         Assumes two dimensions, x and y
         :param poly_order: order of the polynomial
         :param fit_with: method to fit the polynomial, options are 'lstsq' or 'lasso'
@@ -308,7 +308,7 @@ class FlowCircuitODE(torch.nn.Module):
 
     def get_polynomial_representation(self):
         """
-        Return the polynomial representations of the circuit
+        Return the polynomial representations of the system
         Assumes two dimensions, x and y
         """
         # TODO: if not configured, tried computing with fitting method
@@ -358,7 +358,7 @@ class FlowCircuitODE(torch.nn.Module):
 
 
 
-class SaddleNode(FlowCircuitODE):
+class SaddleNode(FlowSystemODE):
     """
     Saddle node bifurcation
         xdot = r + x^2
@@ -397,7 +397,7 @@ class SaddleNode(FlowCircuitODE):
         dy.loc['saddle_node']['$x_1$'] = -1
         return dx, dy
 
-class Pitchfork(FlowCircuitODE):
+class Pitchfork(FlowSystemODE):
     """
     (Supercritical) pitchfork bifurcation:
         xdot = rx - x^3
@@ -428,7 +428,7 @@ class Pitchfork(FlowCircuitODE):
         dy.loc['pitchfork']['$x_1$'] = -1
         return dx, dy
 
-class Homoclinic(FlowCircuitODE):
+class Homoclinic(FlowSystemODE):
     """
     Homoclinic (saddle-loop) bifurcation:
         xdot = y
@@ -476,7 +476,7 @@ class Homoclinic(FlowCircuitODE):
 
 
 
-class Transcritical(FlowCircuitODE):
+class Transcritical(FlowSystemODE):
     """
     (Supercritical) pitchfork bifurcation:
         xdot = rx - x^3
@@ -511,7 +511,7 @@ class Transcritical(FlowCircuitODE):
         dy.loc['transcritical']['$x_1$'] = -1
         return dx, dy
 
-class SimpleOscillator(FlowCircuitODE):
+class SimpleOscillator(FlowSystemODE):
     """
     Simple oscillator:
 
@@ -546,7 +546,7 @@ class SimpleOscillator(FlowCircuitODE):
         zdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1)], dim=-1)
         return zdot#.float()
 
-class NoisySimpleOscillator(FlowCircuitODE):
+class NoisySimpleOscillator(FlowSystemODE):
     """
     Noisy Simple oscillator:
 
@@ -576,7 +576,7 @@ class NoisySimpleOscillator(FlowCircuitODE):
         zdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1)], dim=-1)
         return zdot#.float()
 
-class SelkovOscillator(FlowCircuitODE):
+class SelkovOscillator(FlowSystemODE):
     """
     Selkov oscillator:
         xdot = -x + ay + x^2y
@@ -627,7 +627,7 @@ class SelkovOscillator(FlowCircuitODE):
 
         return dx, dy
 
-class VanDerPolOscillator(FlowCircuitODE):
+class VanDerPolOscillator(FlowSystemODE):
 
     #min_dims = [-6.5, -6.5]
     #max_dims = [6.5, 6.5]
@@ -665,9 +665,9 @@ class VanDerPolOscillator(FlowCircuitODE):
         dy.loc['vanderpol']['$x_0$'] = -6.5 
         return dx, dy
 
-class AlonCircuit(FlowCircuitODE):
+class AlonSystem(FlowSystemODE):
     """
-    One cell type, one ligand circuit from Hart et al. PNAS 2012 (Eq. 7-8):
+    One cell type, one ligand system from Hart et al. PNAS 2012 (Eq. 7-8):
 
         Xdot = (beta(c) - alpha(c)) * X
         cdot = beta3 + beta2 * X - alpha0 * f(c) * X - gamma * c
@@ -700,8 +700,8 @@ class AlonCircuit(FlowCircuitODE):
             
         super().__init__(params=params, labels=labels, min_dims=min_dims, max_dims=max_dims, **kwargs)
 
-        if len(self.params) != AlonCircuit.n_params:
-            ValueError('Alon Circuit requires %d params' % AlonCircuit.n_params)
+        if len(self.params) != AlonSystem.n_params:
+            ValueError('Alon System requires %d params' % AlonSystem.n_params)
         if np.any(np.array(min_dims) < 0):
             ValueError('Ligand and cell quantities are non-negative (min_dims is negative)')
         self.alpha0 = alpha0
@@ -733,7 +733,7 @@ class AlonCircuit(FlowCircuitODE):
         zdot = torch.cat([Xdot.unsqueeze(-1), cdot.unsqueeze(-1)], dim=-1)
         return zdot#.float()
 
-class LotkaVolterra(FlowCircuitODE):
+class LotkaVolterra(FlowSystemODE):
     labels = ['rabbit', 'lynx']
     n_params = 1
     min_dims = [-1.,-1.]
@@ -767,7 +767,7 @@ class LotkaVolterra(FlowCircuitODE):
         return dx, dy
         
 
-class FitzHughNagumo(FlowCircuitODE):
+class FitzHughNagumo(FlowSystemODE):
     """
     Fitzhugh Nagumo model (a prototype of an excitable system, e.g. neuron)
 
@@ -828,7 +828,7 @@ class FitzHughNagumo(FlowCircuitODE):
         dy.loc['fitzhughnagumo']['$x_1$'] = (1/params[1]) * (-3*params[2])
         return dx, dy
 
-class HodgkinHuxley(FlowCircuitODE): # TODO: not working
+class HodgkinHuxley(FlowSystemODE): # TODO: not working
     """
     Hodgkin Huxley modelling initiation and propagation of action potential across neurons:
 
@@ -936,7 +936,7 @@ class HodgkinHuxley(FlowCircuitODE): # TODO: not working
 #            return zdot#.float()
 #
 
-class Kuramoto(FlowCircuitODE):
+class Kuramoto(FlowSystemODE):
     """
     System of oscillators, obtaining an intrinsic intrinsic and coupled frequencies:
     Default is Kuramoto of two oscillators.
@@ -1017,7 +1017,7 @@ class Kuramoto(FlowCircuitODE):
         return super().get_info(exclude)
 
 
-class Lorenz(FlowCircuitODE):
+class Lorenz(FlowSystemODE):
     """
     Lorenz system of equations, prone to chaotic behavior:
 
@@ -1060,7 +1060,7 @@ class Lorenz(FlowCircuitODE):
         else:
             return qdot.float()
 
-class Linear(FlowCircuitODE):
+class Linear(FlowSystemODE):
 
     min_dims = [-1.,-1.]
     max_dims = [1., 1.]
@@ -1083,7 +1083,7 @@ class Linear(FlowCircuitODE):
         dy.loc['linear']['$x_1$'] = params[3]
         return dx, dy
 
-class Conservative(FlowCircuitODE):
+class Conservative(FlowSystemODE):
  
     recommended_param_ranges = 10*[[-3., 3.]]
     recommended_param_groups = [recommended_param_ranges]
@@ -1101,7 +1101,7 @@ class Conservative(FlowCircuitODE):
         zdot = torch.stack([dphi for dphi in torch.gradient(phi,dim=[0,1])]).permute(1,2,0)
         return zdot#.float()
 
-class Incompressible(FlowCircuitODE):
+class Incompressible(FlowSystemODE):
     min_dims = [-1.,-1.]
     max_dims = [1., 1.]
     
@@ -1133,7 +1133,7 @@ class Incompressible(FlowCircuitODE):
         zdot = torch.cat([dphi_dx.unsqueeze(-1), dphi_dy.unsqueeze(-1)],dim=-1)
         return zdot
 
-class Polynomial(FlowCircuitODE):
+class Polynomial(FlowSystemODE):
     """
     Polynomial system of equations up to poly_order. e.g., for poly_order=2, the system is:
         xdot = 
@@ -1212,7 +1212,7 @@ class Polynomial(FlowCircuitODE):
             dy[lb] = params[ilb + nterms]
         return dx, dy
 
-class NeuralODE(FlowCircuitODE):
+class NeuralODE(FlowSystemODE):
     params = {}
     labels = ['u','v']
     #min_dims = [-10.,-10.]
@@ -1240,7 +1240,7 @@ class NeuralODE(FlowCircuitODE):
 
 
 
-# class GrayScottNetwork(FlowCircuitODE):
+# class GrayScottNetwork(FlowSystemODE):
 #     """
 #     Reaction equations of morphogens (Scholes et al.):
 

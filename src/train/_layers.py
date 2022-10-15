@@ -213,8 +213,142 @@ class convNd(nn.Module):
         if self.use_bias:
             resultShape = result.shape
             result = result.view(b, resultShape[1], -1)
-            for k in range(self.out_channels):
+            for k in range(self.out_Gchannels):
                 result[:, k, :] += self.bias[k]
             return result.view(resultShape)
         else:
             return result
+
+class dCNN(nn.Module):
+    def __init__(self, in_shape, num_conv_layers=1,
+            kernel_sizes=[], kernel_features=[],
+            pooling_sizes = [],
+            strides = [1],
+            batch_norm=False, dropout=False, dropout_rate=.5,
+            activation_type='relu', last_pad=False):
+
+        super(dCNN, self).__init__()
+
+        self.last_pad = last_pad
+
+        if activation_type == 'relu':
+            activation = torch.nn.ReLU()
+        elif activation_type == 'softplus':
+            activation = torch.nn.Softplus()
+        elif activation_type == 'tanh':
+            activation = torch.nn.Tanh()
+        elif activation_type == None:
+            activation = None
+        else:
+            raise ValueError('Activation type not recognized!')
+
+        deconv_layers = []
+        for l in range(num_conv_layers):
+            in_channels = in_shape[0] if l==0 else kernel_features[l-1]
+            output_padding = 1 if l == (num_conv_layers - 1) and last_pad else 0
+            deconv_layers.append(torch.nn.ConvTranspose2d(in_channels, kernel_features[l], kernel_sizes[l], stride=strides[l],output_padding=output_padding))
+            if batch_norm:
+                deconv_layers.append(torch.nn.BatchNorm2d(kernel_features[l]))
+            if activation != None:
+               deconv_layers.append(activation)
+            if len(pooling_sizes) >= l +1:
+                deconv_layers.append(torch.nn.MaxPool2d(pooling_sizes[l]))
+
+        self.num_conv_layers = num_conv_layers
+        self.deconv_layers = torch.nn.Sequential(*deconv_layers)
+
+        with torch.no_grad():
+            x = torch.rand(1, *in_shape)
+            y = self.deconv_layers(x)
+            self.out_shape = y.shape[1:]
+            self.out_size = torch.prod(torch.tensor(y.shape))
+
+    def forward(self, x):
+        return self.deconv_layers(x)
+class CNN(nn.Module):
+    def __init__(self, in_shape, num_conv_layers=1,
+            kernel_sizes=[], kernel_features=[],
+            pooling_sizes = [],
+            strides = [1],
+            batch_norm=False, dropout=False, dropout_rate=.5,
+            activation_type='relu'):
+
+        super(CNN, self).__init__()
+
+        if activation_type == 'relu':
+            activation = torch.nn.ReLU()
+        elif activation_type == 'softplus':
+            activation = torch.nn.Softplus()
+        elif activation_type == 'tanh':
+            activation = torch.nn.Tanh()
+        elif activation_type == None:
+            activation = None
+        else:
+            raise ValueError('Activation type not recognized!')
+
+        conv_layers = []
+
+        for l in range(num_conv_layers):
+            in_channels = in_shape[0] if l==0 else kernel_features[l-1]
+            conv_layers.append(torch.nn.Conv2d(in_channels, kernel_features[l], kernel_sizes[l], stride=strides[l]))
+            if batch_norm:
+                conv_layers.append(torch.nn.BatchNorm2d(kernel_features[l]))
+            if activation != None:
+               conv_layers.append(activation)
+            if len(pooling_sizes) >= l +1:
+                conv_layers.append(torch.nn.MaxPool2d(pooling_sizes[l]))
+
+        self.conv_layers = torch.nn.Sequential(*conv_layers)
+
+        with torch.no_grad():
+            x = torch.rand(1, *in_shape)
+            y = self.conv_layers(x)
+            self.out_shape = y.shape[1:]
+            self.out_size = torch.prod(torch.tensor(y.shape))
+
+    def forward(self, x):
+        return self.conv_layers(x)
+class MLP(nn.Module):
+    def __init__(self, in_dim, out_dim, num_hid_layers=1, hid_dims=[64], batch_norm=False, dropout=False, dropout_rate=.5, activation_type='relu'):
+        super(MLP, self).__init__()
+
+        if activation_type == 'relu':
+            activation = torch.nn.ReLU()
+        elif activation_type == 'softplus':
+            activation = torch.nn.Softplus()
+        elif activation_type == 'tanh':
+            activation = torch.nn.Tanh()
+        elif activation_type == None:
+            activation = None
+        else:
+            raise ValueError('Activation type not recognized!')
+
+        layers = []
+
+        for l in range(num_hid_layers + 1):
+            if l == 0:
+                if num_hid_layers == 0:
+                    layers.append(torch.nn.Linear(in_dim, out_dim))
+                else:
+                    layers.append(torch.nn.Linear(in_dim, hid_dims[l]))
+                    if batch_norm:
+                        layers.append(torch.nn.BatchNorm1d(hid_dims[l]))
+                    if activation !=  None:
+                        layers.append(activation)
+                    if dropout:
+                        layers.append(torch.nn.Dropout(p=dropout_rate))
+            if l > 0:
+                if l == num_hid_layers:
+                    layers.append(torch.nn.Linear(hid_dims[l-1], out_dim))
+                else:
+                    layers.append(torch.nn.Linear(hid_dims[l-1], hid_dims[l]))
+                    if batch_norm:
+                        layers.append(torch.nn.BatchNorm1d(hid_dims[l]))
+                    if activation !=  None:
+                        layers.append(activation)
+                    if dropout:
+                        layers.append(torch.nn.Dropout(p=dropout_rate))
+        self.layers = torch.nn.Sequential(*layers)
+    def forward(self,x):
+        return self.layers(x)
+
