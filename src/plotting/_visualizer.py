@@ -10,13 +10,13 @@ plt.style.use('ggplot')
 
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
-from src.data import CircuitFamily
+from src.data import SystemFamily
 
 import pdb
 from scipy.stats import linregress
 from src.utils import nearly_square, ensure_dir, read_yaml
 
-from src.train import predict
+#from src.train import predict
 from itertools import combinations
 from typing import List
 
@@ -25,7 +25,7 @@ class Visualizer(object):
     """
     Reads multiple samples of an experiment to visualize their individual and collective representations
     """
-    def __init__(self, cf: CircuitFamily, train_info: dict,
+    def __init__(self, sf: SystemFamily, train_info: dict,
                  fig_save_dir: str, tt: str, device: str, seed: int, num_samples: int):
 
         torch.manual_seed(seed)
@@ -37,12 +37,12 @@ class Visualizer(object):
 
         train_info_cp = train_info.copy()
         train_info_cp['device'] = device
-        self.latent, self.recon_params, self.params = predict(cf=cf, tt=tt, num_samples=num_samples, **train_info_cp)
+        self.latent, self.recon_params, self.params = predict(sf=sf, tt=tt, num_samples=num_samples, **train_info_cp)
         self.num_samples = self.latent.shape[0]
         # self.device = device
         self.tt = tt
-        self.cf = cf
-        self.param_ranges = cf.param_ranges
+        self.sf = sf
+        self.param_ranges = sf.param_ranges
         self.latent_dim = train_info['latent_dim']
 
         self.fig_save_dir = fig_save_dir
@@ -109,7 +109,7 @@ class Visualizer(object):
     def visualize_fits(self, **kwargs):
         print('Visualizing parameter fits...')
 
-        # Circuit recon
+        # System recon
         colors = np.random.rand(self.num_DE_params, 3)
         fig_shape = nearly_square(self.num_DE_params)
         fig, axes = plt.subplots(fig_shape[0], fig_shape[1], figsize=(2 * fig_shape[0], 2 * fig_shape[1]))
@@ -139,7 +139,7 @@ class Visualizer(object):
         def plot_trajectory(pr, title_pref, ax):
             title= title_pref + '(' + ', '.join(
                 [str(np.around(p, decimals=2)) for p in pr]) + ')'
-            DE_inst = self.cf.DE(params=pr, **self.cf.data_info)
+            DE_inst = self.sf.DE(params=pr, **self.sf.data_info)
             DE_inst.plot_trajectory(T=vis_time, alpha=vis_alpha, num_lattice=vis_res, ax=ax, title=title, which_dims=which_dims)
 
         title_pref = r'$\alpha=$'

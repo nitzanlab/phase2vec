@@ -10,6 +10,7 @@ import click
 import ruamel.yaml as yaml
 import torch.nn.functional as F
 import pdb
+
 def str_to_list(s):
     """
     Converts str of list of floats to a list of floats
@@ -194,51 +195,3 @@ def nearly_square(n):
 
 def stable_sigmoid(x):
     return torch.where(x < 0, torch.exp(x) / (1 + torch.exp(x)), torch.exp(-1*x) / ((1+torch.exp(-1*x))))
-
-def curl(f, spacings=1):
-    '''Returns the curl of a batch of 2d (3d) vector fields shaped batch x dim x spatial x spatial (x spatial)'''
-    num_dims = f.shape[1]
-    if num_dims > 4:
-        raise ValueError('Curl is only defined for dim <=3.')
-    elif num_dims < 3:
-        b = f.shape[0]
-        s = f.shape[-1]
-        f = torch.tile(f.unsqueeze(-1),(s,))
-        f = torch.cat((f, torch.zeros(b,1,s,s,s)), dim=1)
-        spacings = [sp for sp in spacings]
-        spacings.append(spacings[-1])
-        spacings = tuple(spacings)
-    #J = torch.rot90(jacobian(f,spacings=spacings),-1, (1,2))
-    J = jacobian(f,spacings=spacings)
-    # J = [[dFxdx, dFxdy],[dFydx,dFydy]]
-    # or
-    # J = [[dFxdx, dFxdy, dFxdz],[dFydx,dFydy,dFydz],[dFzdx, dFzdy, dFzdz]]
-    # curl = nabla X F = [[dFzdy - dFydz],[dFxdz - dFzdx],[dFydx - dFxdy]]
-
-    dFxdy = J[:,0,1]
-    dFxdz = J[:,0,2]
-    dFydx = J[:,1,0]
-    dFydz = J[:,1,2]
-    dFzdx = J[:,2,0]
-    dFzdy = J[:,2,1]
-    return torch.stack([dFzdy - dFydz, dFxdz - dFzdx, dFydx - dFxdy]).movedim(1,0)
-
-def divergence(f,spacings=1):
-    '''Returns the divergence of a batch of planar vector fields shaped batch x dim x spatial x spatial'''
-
-    # J.shape = batch x dim x dim x [spatial]^n
-    J = jacobian(f,spacings=spacings)
-    #return torch.diagonal(torch.rot90(J,-1, (1,2)),dim1=1,dim2=2).sum(-1)
-    return torch.diagonal(J,dim1=1,dim2=2).sum(-1)
-
-def jacobian(f,spacings=1):
-    '''Returns the Jacobian of a batch of planar vector fields shaped batch x dim x spatial x spatial'''
-    num_dims = f.shape[1]
-    return torch.stack([torch.stack(torch.gradient(f[:,i],dim=list(range(1,num_dims+1)), spacing=spacings)) for i in range(num_dims)]).movedim(2,0)
-
-def laplacian(f):
-    '''Calculate laplacian of vector field'''
-    num_dims = f.shape[1]
-    if num_dims>3:
-        raise ValueError('Laplacian not yet implemented for dim>2.')
-    return torch.stack([divergence(torch.stack(torch.gradient(f[:,i], dim=[1,2])).movedim(1,0)) for i in range(num_dims)]).movedim(1,0)

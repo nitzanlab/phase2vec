@@ -6,9 +6,9 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from src.data._odes import *
 
-class CircuitFamily():
+class SystemFamily():
     """
-    Family of ODE or PDE circuits
+    Family of ODE or PDE systems
     """
 
     @staticmethod
@@ -17,7 +17,7 @@ class CircuitFamily():
         Selecting supported ODE or PDE generator
         """
         if data_name == 'alon':
-            generator = AlonCircuit
+            generator = AlonSystem
 
         elif data_name == 'lotka_volterra':
             generator = LotkaVolterra
@@ -82,21 +82,21 @@ class CircuitFamily():
 
         return generator
 
-    def __init__(self, data_name, data_dir=None, device=None, min_dims=None, max_dims=None, param_ranges=None, param_groups=None, default_sampler='uniform', **kwargs):
+    def __init__(self, data_name, data_dir=None, device=None, min_dims=None, max_dims=None, num_lattice=64, param_ranges=None, param_groups=None, default_sampler='uniform', **kwargs):
         """
-        Generate a circuit family
-        :param data_name: name of circuit
+        Generate a system family
+        :param data_name: name of system
         :param param_ranges: range for each param in model, 
         :param data_dir: directory to save data
         :param device: device to use
         :param min_dims: minimum range of dimensions to use
         :param max_dims: maximum range of dimensions to use
-        :param kwargs: any arguments of a general circuit
+        :param kwargs: any arguments of a general system
         """
         self.data_name = data_name
         self.pde = False
          
-        DE = CircuitFamily.get_generator(self.data_name)
+        DE = SystemFamily.get_generator(self.data_name)
         self.data_dir = os.path.abspath(data_dir) if data_dir is not None else '.'
 
         # if not provided, use ode suggested params
@@ -120,13 +120,13 @@ class CircuitFamily():
         data_info = DE_ex.get_info()
         data_info = {**self.__dict__, **data_info} # merge dictionaries
         self.data_info = data_info
-        self.num_lattice = DE_ex.num_lattice
+        self.num_lattice = num_lattice
         self.dim = DE_ex.dim
         self.DE = DE
         self.DE_ex = DE_ex
         if self.data_name != 'grayscott': # TODO: ask isinstance(generator, ODE/PDE)
             # TODO: can generator.param can be used as default?
-            self.L = self.DE_ex.generate_mesh() # min_dims, max_dims, num_lattice
+            self.L = self.DE_ex.generate_mesh(num_lattice=num_lattice) # min_dims, max_dims, num_lattice
             self.L = self.L.to(device).float()
 
         self.kwargs = kwargs
@@ -204,7 +204,7 @@ class CircuitFamily():
 
     def generate_flow(self, params, **kwargs):
         """
-        Generate flow over circuit with params
+        Generate flow over system with params
         """
         model = self.generate_model(params, **kwargs)
         if self.data_name != 'grayscott':
@@ -220,8 +220,8 @@ class CircuitFamily():
 
     def make_data(self, num_samples):
         """
-        Generates data of circuit
-        data_name - name of circuit
+        Generates data of system
+        data_name - name of system
         param_ranges - range for each param in model
         """
 
@@ -321,8 +321,8 @@ class CircuitFamily():
 
     def plot_vector_fields(self, params=None, param_selection='random', add_trajectories=False, **kwargs):
         """
-        Plot vector fields of circuit
-        :param params: array of params for circuit
+        Plot vector fields of system
+        :param params: array of params for system
         :param param_selection: plot extreme (minimal, intermediate and maximal bounds) param combinations
         :param kwargs: additional params for sampling method
         """
@@ -360,19 +360,19 @@ class CircuitFamily():
         plt.show()
 
 if __name__ == '__main__':
-    # cf = CircuitFamily(data_name='simple_oscillator', param_ranges=[[-1, 1]], data_dir=None, device='cpu', min_dims=[-0.5, -0.5], max_dims=[0.5, 0.5])
+    # sf = SystemFamily(data_name='simple_oscillator', param_ranges=[[-1, 1]], data_dir=None, device='cpu', min_dims=[-0.5, -0.5], max_dims=[0.5, 0.5])
     poly_order = 3
     dim = 2
     nparams = library_size(dim, poly_order=poly_order) * 2
     # import pdb; pdb.set_trace()
-    # cf = CircuitFamily(data_name='simple_oscillator', param_ranges=[[-2, 2]], data_dir=None, device='cpu')
-    cf = CircuitFamily(data_name='polynomial', param_ranges=[[-2, 2]] * nparams, data_dir=None, device='cpu', poly_order=poly_order)
-    # DE_inst = cf.DE(params=[1], **cf.data_info)
+    # sf = SystemFamily(data_name='simple_oscillator', param_ranges=[[-2, 2]], data_dir=None, device='cpu')
+    sf = SystemFamily(data_name='polynomial', param_ranges=[[-2, 2]] * nparams, data_dir=None, device='cpu', poly_order=poly_order)
+    # DE_inst = sf.DE(params=[1], **sf.data_info)
     # DE_inst.plot_vector_field()
     # plt.show()
-    cf.plot_vector_fields(param_selection='random', num_samples=4, add_trajectories=True)
+    sf.plot_vector_fields(param_selection='random', num_samples=4, add_trajectories=True)
     plt.show()
-    # cf.plot_vector_fields(param_selection='sparse', num_samples=4, p=0.2)
+    # sf.plot_vector_fields(param_selection='sparse', num_samples=4, p=0.2)
     # plt.show()
 
 

@@ -6,14 +6,14 @@ import time
 import numpy as np
 from functools import partial
 
-from src.train import train
+from src.train import train_model, run_epoch, load_model
 from src.plotting import Visualizer, VisualizerGridsearch
 
 from src.gridsearch import generate_gridsearch_worker_params, get_gridsearch_default_scans, results_to_df
 from src.gridsearch import wrap_command_with_local, wrap_command_with_slurm, write_jobs
 from src.utils import command_with_config, ensure_dir, get_command_defaults
-from src.utils import write_yaml, read_yaml, timestamp, strtuple_to_list, str_to_list, get_last_config
-from src.data import CircuitFamily
+from src.utils import update_yaml, write_yaml, read_yaml, timestamp, strtuple_to_list, str_to_list, get_last_config
+from src.data import SystemFamily, sindy_library, load_dataset
 from sklearn.model_selection import train_test_split
 import torch
 
@@ -45,10 +45,12 @@ help="Generates a data set of vector fields.")
 @click.option('--num-samples', '-m', type=int, default=1000)
 @click.option('--samplers', '-sp', type=str, multiple=True, default=['uniform'])
 @click.option('--system-props', '-c', type=float, multiple=True, default=[1.0])
-@click.option('--test-size', '-t', type=float, default=.25)
+@click.option('--val-size', '-t', type=float, default=.25)
+@click.option('--num_lattice', '-n', type=int, default=64)
+@click.option('--min-dims', '-mi', type=list, default=[-1.,-1.])
+@click.option('--max-dims', '-ma', type=list, default=[1.,1.])
 @click.option('--config-file', type=click.Path())
-#@click.pass_context
-def generate_dataset(data_dir, data_set_name, system_names, num_samples, samplers, system_props, test_size, config_file):
+def generate_dataset(data_dir, data_set_name, system_names, num_samples, samplers, system_props, val_size, num_lattice, min_dims, max_dims, config_file):
     """
     Generates train and test data for one data set
 
@@ -59,27 +61,28 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
     num_samples (int): number of total samples to generate
     samplers (list of strings): for each system, a string denoting the type of sampler used. 
     system_props (list of floats): for each system, a float controlling proportion of total data this system will comprise.
-    test_size (float): proportion in (0,1) of data allocated to testing set
+    val_size (float): proportion in (0,1) of data allocated to validation set
+    num_lattice (int): number of points for all dimensions in the equally spaced grid on which velocity is measured
+    min_dims (list of floats): the lower bounds for each dimension in phase space
+    max_dims (list of floats): the upper bounds for each dimension in phase space
 
     """
 
     # Living dangerously
     import warnings
     warnings.filterwarnings("ignore")
-    # TODO: For now, no control here over param ranges, min or max dims. Just use cf defaults
+    # TODO: For now, no control here over param ranges, min or max dims. Just use sf defaults
     # TODO: Add noise params
     # TODO: Add control for poly params
 
     save_dir = os.path.join(data_dir, data_set_name)
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
 
     all_data   = []
     all_labels = []
     all_pars   = []
 
-    cfs = [CircuitFamily(data_name=system_name, default_sampler=sampler) for (system_name, sampler) in zip(system_names, samplers)]
-    num_labels_per_group = [len(cf.param_groups) for cf in cfs]
+    sfs = [SystemFamily(data_name=system_name, default_sampler=sampler) for (system_name, sampler) in zip(system_names, samplers)]
+    num_labels_per_group = [len(sf.param_groups) for sf in sfs]
     cum_labels_per_group = [0] + list(np.cumsum(num_labels_per_group))[:-1]
 
     # For each system
@@ -88,8 +91,8 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
         print(f'Generating {system_name} data.')
 
         sampler       = samplers[d]
-        cf            = CircuitFamily(data_name=system_name, default_sampler=sampler)
-        num_classes   = cf.num_classes
+        sf            = sfs[d]
+        num_classes   = sf.num_classes
 
         system_samples = int(system_props[d] * num_samples)
         class_samples  = int(system_samples / float(num_classes))
@@ -99,14 +102,14 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
             current_exemplars = 0
             # Until you have the right number of exemplars from this class
             while current_exemplars < class_samples:
-                gen_par = cf.param_sampler(1)[0]
-                system  = cf.generate_model(gen_par)
+                gen_par = sf.param_sampler(1)[0]
+                system  = sf.generate_model(gen_par)
                 if system.label != c:
                     # If wrong label, get another sample
                     continue
                 else:
                     current_exemplars += 1
-                    datum     = system.forward(0,cf.L)
+                    datum     = system.forward(0,sf.L)
                     label     = system.label + cum_labels_per_group[d]
 
                     # If system doesn't have a closed from in the dictionary, approximate its coefficients with least squares
@@ -125,91 +128,153 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
     all_pars   = torch.stack(all_pars).numpy()
     all_labels = np.array(all_labels)
 
-    split = train_test_split(all_data, all_labels, all_pars, test_size=test_size, stratify=all_labels)
+    split = train_test_split(all_data, all_labels, all_pars, test_size=val_size, stratify=all_labels)
 
-    for dt, nm in zip(split, ['X_train', 'X_test', 'y_train', 'y_test', 'p_train', 'p_test']):
+    for dt, nm in zip(split, ['X_train', 'X_val', 'y_train', 'y_val', 'p_train', 'p_val']):
         np.save(os.path.join(save_dir, nm + '.npy'), dt)
 
 @cli.command(name='train', cls=command_with_config('config_file'), help='train a VAE to learn reduced models')
 @click.argument("data-config", type=click.Path())
+@click.argument("net-config", type=click.Path())
 @click.option('--exp-name', type=str)
 @click.option('--num-epochs', type=int, default=10)
-@click.option('--batch-size', type=int, default=16)
-@click.option('--latent-dim', type=int, default=16)
-@click.option('--first-pad', type=int, default=0)
-@click.option('--last-pad', type=int, default=0)
+@click.option('--batch-size', type=int, default=64)
 @click.option('--beta', type=float, default=1.0)
-@click.option('--gamma', type=float, default=0.0)
-@click.option('--p', type=float, default=1.0)
-@click.option('--num-sparsified', type=int, default=1)
-@click.option('--model-type', type=str, default='ResParAE')
-@click.option('--recon-loss', type=str, default='euclidean')
-@click.option('--device', type=str, default='cuda')
-@click.option('--pde', is_flag=True)
-@click.option('--scale-output', is_flag=True)
-@click.option('--whiten', is_flag=True)
-@click.option('--means-train', type=str, multiple=True, default=[]) # TODO: are these different???
-@click.option('--means-test', type=str, multiple=True, default=[])
-@click.option('--stds-train', type=str, multiple=True, default=[])
-@click.option('--stds-test', type=str, multiple=True, default=[])
-@click.option('--optimizer_name', type=str, default='Adam')
+@click.option('--fp_normalize', is_flag=True, default=True)
+@click.option('--device', type=str, default='cpu')
+@click.option('--optimizer', type=str, default='Adam')
 @click.option('--learning-rate', type=float, default=.0001)
-@click.option('--max-grad', type=float, default=10.0)
-# @click.option('--data-dir', type=str)
+@click.option('--momentum', type=float, default=0.0)
 @click.option('--model-save-dir', type=str)
-# @click.option('--fig-save-dir', type=str)
 @click.option('--log-dir', type=str)
-@click.option('--save-model-every', type=int, default=1)
+@click.option('--log-period', type=int, default=10)
 @click.option('--seed', type=int, default=0)
 @click.option('--config-file', type=click.Path())
-def call_train(data_config, exp_name, model_save_dir, log_dir, config_file, **kwargs):
+def call_train(data_config, net_config, exp_name, num_epochs, batch_size, beta, fp_normalize, poly_order, device, optimizer, learning_rate, momentum, model_save_dir, log_dir, log_period, seed, config_file):
     """
-    Train an autoencoder on data of a circuit family
+    Train vector field embeddings
     """
     data_info = read_yaml(data_config)
-    cf = CircuitFamily(**data_info)
+    net_info = read_yaml(net_config)
 
     if exp_name is None:
         id = str(uuid.uuid4())
-        exp_name = cf.data_name + '_' + id
+        exp_name = sf.data_name + '_' + id
 
-    # TODO: removing
-    # model_save_dir = os.path.join(model_save_dir, cf.data_name)
-    # log_dir = os.path.join(log_dir, cf.data_name)
     ensure_dir(log_dir)
+    model_save_dir = os.path.join(model_save_dir, exp_name)
     ensure_dir(model_save_dir)
 
     start = time.time()
 
-    train_observables, test_observables = train(cf, exp_name=exp_name, model_save_dir=model_save_dir, log_dir=log_dir, **kwargs)
+    data_path = os.path.join(data_info['data_dir'], data_info['data_set_name'])
 
-    print('Successfully trained on data config: {}'.format(data_config))
+    X_train, X_test, y_train, y_test, p_train, p_test = load_dataset(data_path)
 
-    stop = time.time()
-    duration = stop - start
+    model_type = net_info['model_type']
+    pretrained_path = net_info['pretrained_path']
+    del net_info['model_type']
+    del net_info['pretrained_path']
+    net = load_model(model_type, pretrained_path=pretrained_path, device=device, **net_info)
 
-    train_info = kwargs
-    train_info['data_config'] = data_config
-    train_info['exp_name'] = exp_name
-    train_info['model_save_dir'] = model_save_dir
-    train_info['log_dir'] = log_dir
-    train_info['model_save_path'] = os.path.join(model_save_dir, exp_name + '.pt')
+    net = train_model(X_train, X_test,
+                      y_train, y_test,
+                      p_train, p_test,
+                      net, exp_name,
+                      num_epochs=num_epochs,
+                      learning_rate=learning_rate,
+                      momentum=momentum,
+                      optimizer=optimizer,
+                      batch_size=batch_size,
+                      beta=beta,
+                      fp_normalize=fp_normalize,
+                      device=device,
+                      log_dir=log_dir,
+                      log_period=log_period)
 
-    train_config = os.path.join(model_save_dir, exp_name + '_train.yaml')
-    write_yaml(train_config, train_info)
-    print('Train config file: {} \n'.format(train_config))
+    torch.save(net.state_dict(), os.path.join(model_save_dir, 'model.pt'))
 
-    results = {**train_observables, **test_observables, 'train_time': duration}
-    results_config = os.path.join(model_save_dir, exp_name + '_results.yaml')
-    write_yaml(results_config, results)
-    print('Train/test observables: {}'.format(results_config))
+@cli.command(name="evaluate", help='Evaluates a trained model on a data set.')
+@click.argument('data-config', type=str)
+@click.argument('net-config', type=str)
+@click.argument('train-config', type=str)
+@click.option('--pretrained-path', type=str)
+@click.option('--results-dir', type=str)
+@click.option('--output-file', '-o', type=click.Path(), default='results.yaml')
+def evaluate(data_config, net_config, train_config, pretrained_path, results_dir, output_file):
+
+    data_info = read_yaml(data_config)
+    net_info = read_yaml(net_config)
+    train_info = read_yaml(train_config)
+
+    data_path = os.path.join(data_info['data_dir'], data_info['data_set_name'])
+
+    if results_dir is None:
+        results_dir = '.'
+    ensure_dir(results_dir)
+    
+    output_file = os.path.join(results_dir, output_file)
+
+    X_train, X_test, y_train, y_test, p_train, p_test = load_dataset(data_path)
+    model_type = net_info['model_type']
+    pretrained_path = net_info['pretrained_path'] if pretrained_path is None else os.path.join(pretrained_path,'model.pt')
+    del net_info['model_type']
+    del net_info['pretrained_path']
+    net = load_model(model_type, pretrained_path=pretrained_path, device=train_info['device'], **net_info)
+
+    for i, (name, data, labels, pars) in enumerate(zip(['train', 'test'], [X_train, X_test],[y_train, y_test],[p_train, p_test])):
+        losses, embeddings = run_epoch(data, labels, pars,
+                                   net, library, 0, None,
+                                   train=False,
+                                   batch_size=train_info['batch_size'],
+                                   beta=train_info['beta'],
+                                   fp_normalize=train_info['fp_normalize'],
+                                   device=train_info['device'],
+                                   return_embeddings=True)
+
+         
+        np.save(os.path.join(results_dir,f'{name}_embeddings.npy'), embeddings.detach().cpu().numpy())
+
+        loss_dict = {f'{name}_total_loss': str(np.mean(losses[0])), f'{name}_recon_loss': str(np.mean(losses[1])), f'{name}_sparsity_loss': str(np.mean(losses[2])), f'{name}_parameter_loss': str(np.mean(losses[3]))}
+        #import pdb
+        #pdb.set_trace()
+
+        yaml_fn = write_yaml if i == 0 else update_yaml
+        for (key, value) in loss_dict.items():
+            print(key + f': {value}')
+        yaml_fn(output_file, loss_dict)
+
+@cli.command(name="generate-net-config", help="Generates a configuration file that holds editable options for a deep net.")
+@click.option('--net-class', type=str, default='CNNwFC_exp_emb')
+@click.option('--latent-dim', type=int, default=100)
+@click.option('--in-shape', type=list, default=[2,64,64])
+@click.option('--num-conv-layers', type=int, default=3)
+@click.option('--kernel-sizes', type=list, default=3*[3])
+@click.option('--kernel-features', type=list, default=3*[128])
+@click.option('--strides', type=list, default=3*[2])
+@click.option('--pooling-sizes', type=list, default=[])
+@click.option('--min-dims', '-mi', type=list, default=[-1.,-1.])
+@click.option('--max-dims', '-ma', type=list, default=[1.,1.])
+@click.option('--num-fc-hid-layers', type=int, default=2)
+@click.option('--fc-hid-dims', type=list, default=2*[128])
+@click.option('--poly_order', type=int, default=3)
+@click.option('--batch-norm', is_flag=True, default=True)
+@click.option('--dropout', is_flag=True, default=True)
+@click.option('--dropout-rate', type=float, default=.1)
+@click.option('--activation-type', type=str, default='relu')
+@click.option('--output-file', '-o', type=click.Path(), default='net-config.yaml')
+def generate_net_config(**args):
+    output_file = args['output_file']
+    output_file = os.path.abspath(output_file)
+    write_yaml(output_file, args)
+    print(f'Successfully generated net config file at "{output_file}".')
 
 @cli.command(name="generate-data-config", help="Generates a configuration file that holds editable options for a dataset.")
 @click.option('--output-file', '-o', type=click.Path(), default='data-config.yaml')
-def generate_train_config(output_file):
+def generate_data_config(output_file):
     output_file = os.path.abspath(output_file)
     write_yaml(output_file, get_command_defaults(generate_dataset))
-    print(f'Successfully generated train config file at "{output_file}".')
+    print(f'Successfully generated data config file at "{output_file}".')
 
 @cli.command(name="generate-train-config", help="Generates a configuration file that holds editable options for training parameters.")
 @click.option('--output-file', '-o', type=click.Path(), default='train-config.yaml')
@@ -240,18 +305,18 @@ def visualize(data_config, train_config, fig_save_dir, num_samples, tt,
     Visualize results of a single training experiment
     """
     data_info = read_yaml(data_config)
-    cf = CircuitFamily(**data_info)
+    sf = SystemFamily(**data_info)
 
     train_config_path = get_last_config(train_config, suffix='_train')
     if train_config_path is None:
-        train_config_path = get_last_config(os.path.join(train_config, cf.data_name), suffix='_train')
+        train_config_path = get_last_config(os.path.join(train_config, sf.data_name), suffix='_train')
 
 
     train_info = read_yaml(train_config_path)
 
-    fig_save_dir = os.path.join(fig_save_dir, cf.data_name)
+    fig_save_dir = os.path.join(fig_save_dir, sf.data_name)
 
-    V = Visualizer(cf, train_info, tt=tt, num_samples=num_samples, fig_save_dir=fig_save_dir, device=device, seed=seed)
+    V = Visualizer(sf, train_info, tt=tt, num_samples=num_samples, fig_save_dir=fig_save_dir, device=device, seed=seed)
 
     V.visualize_selected(visualize_latent, visualize_fits, visualize_flows, **kwargs)
 

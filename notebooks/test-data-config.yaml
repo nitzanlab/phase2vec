@@ -1,0 +1,11 @@
+config_file: null
+data_dir: null
+data_set_name: dataset
+max_dims: [1.0, 1.0]
+min_dims: [-1.0, -1.0]
+num_lattice: 64
+num_samples: 1000
+samplers: [uniform]
+system_names: [simple_oscillator]
+system_props: [1.0]
+val_size: 0.25
