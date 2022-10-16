@@ -61,6 +61,7 @@ def train_model(X_train, X_test,
             writer.add_scalars(f"/Loss/Parameter",{mode + exp_name:avg_losses[3]}, e)
 
     return net
+
 def run_epoch(data, labels, gt_pars, net, epoch, opt,
               train=False,
               batch_size=10,
@@ -85,19 +86,21 @@ def run_epoch(data, labels, gt_pars, net, epoch, opt,
         
     euclidean = normalized_euclidean if fp_normalize else euclidean_loss
         
-    num_iter = int(data.shape[0] / batch_size)
+    num_iter = int(np.ceil(data.shape[0] / float(batch_size)))
     num_lattice = data.shape[2]
     for i in range(num_iter):
-        batch        = torch.tensor(data[i * batch_size:(i+1)*batch_size]).to(device).float()
-        batch_labels = torch.tensor(labels[i * batch_size:(i+1)*batch_size])
-        batch_pars = torch.tensor(gt_pars[i * batch_size:(i+1)*batch_size]).to(device).float()
+
+        effective_batch_size = min(batch_size, len(data) - i*batch_size)
+        batch        = torch.tensor(data[i * batch_size:i*batch_size + effective_batch_size]).to(device).float()
+        batch_labels = torch.tensor(labels[i * batch_size:i*batch_size + effective_batch_size])
+        batch_pars   = torch.tensor(gt_pars[i * batch_size:i*batch_size + effective_batch_size]).to(device).float()
         dim = batch.shape[1]
         
         if train:
             opt.zero_grad()
         
         # Forward pass
-        z    = net.emb(net.conv(batch).reshape(batch_size, -1))
+        z    = net.emb(net.conv(batch).reshape(effective_batch_size, -1))
         pars  = net.fc(z)
         pars = pars.reshape(-1,library.shape[-1], dim)
 
@@ -106,13 +109,13 @@ def run_epoch(data, labels, gt_pars, net, epoch, opt,
             embeddings.append(z)
 
         # Reconstruction using fn dictionary
-        recon = torch.einsum('sl,bld->bsd',library.to(device),pars).reshape(batch_size, num_lattice,num_lattice,dim).permute(0,3,1,2)
+        recon = torch.einsum('sl,bld->bsd',library.to(device),pars).reshape(effective_batch_size, num_lattice,num_lattice,dim).permute(0,3,1,2)
         
         recon_loss      = euclidean(recon, batch)
 
         # Sparsity
-        sparsity_loss   = pars.reshape(batch_size, -1).abs().mean(1)
-        gt_sparsity     = batch_pars.reshape(batch_size, -1).abs().mean(1)
+        sparsity_loss   = pars.reshape(effective_batch_size, -1).abs().mean(1)
+        gt_sparsity     = batch_pars.reshape(effective_batch_size, -1).abs().mean(1)
         vis_sparsity    = (sparsity_loss / gt_sparsity).mean()
         total_loss      = recon_loss + beta * sparsity_loss.mean()
 
@@ -127,7 +130,7 @@ def run_epoch(data, labels, gt_pars, net, epoch, opt,
         ploss_history.append(par_loss.detach().cpu().numpy())
 
     if return_embeddings:
-        embeddings = torch.stack(embeddings).reshape(-1, net.latent_dim)
+        embeddings = torch.cat(tuple([emb for emb in embeddings])).reshape(-1, net.latent_dim)
         return [tloss_history, rloss_history, sloss_history, ploss_history], embeddings
     else:
         return [tloss_history, rloss_history, sloss_history, ploss_history]
