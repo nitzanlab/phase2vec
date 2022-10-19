@@ -16,7 +16,6 @@ def load_dataset(data_path):
     p_val = np.load(os.path.join(data_path, 'p_val.npy'))
     return X_train, X_val, y_train, y_val, p_train, p_val
 
-
 def jacobian(f,spacings=1):
     '''Returns the Jacobian of a batch of planar vector fields shaped batch x dim x spatial x spatial'''
     num_dims = f.shape[1]
@@ -59,4 +58,3 @@ def laplacian(f):
     if num_dims>3:
         raise ValueError('Laplacian not yet implemented for dim>2.')
     return torch.stack([divergence(torch.stack(torch.gradient(f[:,i], dim=[1,2])).movedim(1,0)) for i in range(num_dims)]).movedim(1,0)
-

@@ -1,0 +1,5 @@
+'0': {f1-score: 1.0, precision: 1.0, recall: 1.0, support: 125}
+'1': {f1-score: 1.0, precision: 1.0, recall: 1.0, support: 125}
+accuracy: 1.0
+macro avg: {f1-score: 1.0, precision: 1.0, recall: 1.0, support: 250}
+weighted avg: {f1-score: 1.0, precision: 1.0, recall: 1.0, support: 250}
