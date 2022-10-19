@@ -14,7 +14,10 @@ from src.gridsearch import wrap_command_with_local, wrap_command_with_slurm, wri
 from src.utils import command_with_config, ensure_dir, get_command_defaults
 from src.utils import update_yaml, write_yaml, read_yaml, timestamp, strtuple_to_list, str_to_list, get_last_config
 from src.data import SystemFamily, sindy_library, load_dataset
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, KFold
+from sklearn.linear_model import LogisticRegressionCV
+from sklearn.metrics import classification_report
+
 import torch
 
 # Here we will monkey-patch click Option __init__
@@ -76,12 +79,13 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
     # TODO: Add control for poly params
 
     save_dir = os.path.join(data_dir, data_set_name)
+    ensure_dir(save_dir)
 
     all_data   = []
     all_labels = []
     all_pars   = []
 
-    sfs = [SystemFamily(data_name=system_name, default_sampler=sampler) for (system_name, sampler) in zip(system_names, samplers)]
+    sfs = [SystemFamily(data_name=system_name, default_sampler=sampler, num_lattice=num_lattice, min_dims=min_dims, max_dims=max_dims) for (system_name, sampler) in zip(system_names, samplers)]
     num_labels_per_group = [len(sf.param_groups) for sf in sfs]
     cum_labels_per_group = [0] + list(np.cumsum(num_labels_per_group))[:-1]
 
@@ -113,11 +117,10 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
                     label     = system.label + cum_labels_per_group[d]
 
                     # If system doesn't have a closed from in the dictionary, approximate its coefficients with least squares
-                    if system_name in ['simple_oscillator', 'alon']:
+                    if system_name in ['simple_oscillator', 'alon', 'conservative', 'incompressible']:
                         dx, dy = system.fit_polynomial_representation(poly_order=3)
                     else:
                         dx, dy = system.get_polynomial_representation()
-
                     save_pars = torch.cat((torch.tensor(dx.to_numpy()), torch.tensor(dy.to_numpy()))).transpose(1,0).float()
 
                     all_data.append(datum)
@@ -200,7 +203,7 @@ def call_train(data_config, net_config, exp_name, num_epochs, batch_size, beta, 
 @click.argument('train-config', type=str)
 @click.option('--pretrained-path', type=str)
 @click.option('--results-dir', type=str)
-@click.option('--output-file', '-o', type=click.Path(), default='results.yaml')
+@click.option('--output-file', '-o', type=click.Path(), default='training_results.yaml')
 def evaluate(data_config, net_config, train_config, pretrained_path, results_dir, output_file):
 
     data_info = read_yaml(data_config)
@@ -233,16 +236,70 @@ def evaluate(data_config, net_config, train_config, pretrained_path, results_dir
                                    return_embeddings=True)
 
          
-        np.save(os.path.join(results_dir,f'{name}_embeddings.npy'), embeddings.detach().cpu().numpy())
+        np.save(os.path.join(results_dir,f'embeddings_{name}.npy'), embeddings.detach().cpu().numpy())
 
         loss_dict = {f'{name}_total_loss': str(np.mean(losses[0])), f'{name}_recon_loss': str(np.mean(losses[1])), f'{name}_sparsity_loss': str(np.mean(losses[2])), f'{name}_parameter_loss': str(np.mean(losses[3]))}
-        #import pdb
-        #pdb.set_trace()
 
         yaml_fn = write_yaml if i == 0 else update_yaml
         for (key, value) in loss_dict.items():
             print(key + f': {value}')
         yaml_fn(output_file, loss_dict)
+
+@cli.command(name='classify', help="Trains a logistic regression classifier on labeled embeddings.")
+@click.argument('data-path', type=str)
+@click.option('--feature-name', type=str, default='embeddings')
+@click.option('--classifier', type=click.Choice(['logistic_regressor', 'k_means']), default='logistic_regressor')
+@click.option('--results-dir', type=str)
+@click.option('--penalty', type=str, default='l2')
+@click.option('--num-c', type=int, default=11)
+@click.option('--k', type=int, default=10)
+@click.option('--multi-class', type=str, default='ovr')
+@click.option('--verbose', type=int, default=0)
+@click.option('--seed', type=int, default=0)
+@click.option('--output-file', '-o', type=click.Path(), default='classifier_results.yaml')
+def classify(data_path, feature_name, classifier, results_dir, penalty, num_c, k, multi_class, verbose, seed, output_file):
+
+    output_file = os.path.join(results_dir, output_file)
+
+    X_train, X_test, y_train, y_test, p_train, p_test = load_dataset(data_path)
+
+    z_train = np.load(os.path.join(results_dir, f'{feature_name}_train.npy'))
+    z_test = np.load(os.path.join(results_dir, f'{feature_name}_test.npy'))
+
+    Cs = np.logspace(-5, 5, num_c)
+    kf = KFold(n_splits=int(len(y_train) / float(k)))
+
+    clf_params = {
+        'cv': kf,
+        'random_state': seed,
+        'dual': False,
+        'solver': 'lbfgs',
+        'class_weight': 'balanced',
+        'multi_class': multi_class,
+        'refit': True,
+        'scoring': 'accuracy',
+        'tol': 1e-2,
+        'max_iter': 5000,
+        'verbose': verbose}
+
+    # Load and train classifier
+    if penalty != 'none':
+        clf_params.update({
+            'Cs': Cs,
+            'penalty': penalty
+        })
+
+    if classifier == 'logistic_regressor':
+        clf = LogisticRegressionCV(**clf_params).fit(z_train, y_train)
+    elif clasisfier == 'k_means':
+        num_classes = len(np.unique(y_train))
+        clf = KMeans(n_clusters=num_classes, random_state=seed).fit(z_train)
+
+    y_pred = clf.predict(z_test)
+    report = classification_report(y_test, y_pred, output_dict=True)
+    for (key, value) in report.items():
+            print(key + f': {value}')
+    write_yaml(output_file, report)
 
 @cli.command(name="generate-net-config", help="Generates a configuration file that holds editable options for a deep net.")
 @click.option('--net-class', type=str, default='CNNwFC_exp_emb')

@@ -67,16 +67,6 @@ class SystemFamily():
         elif data_name == 'incompressible':
             generator = Incompressible
 
-        # elif data_name == 'kuramoto': # TODO: fix constructor
-        #     generator = Kuramoto
-            # generator.set_n_oscillators(**kwargs)
-
-        # elif data_name == 'grayscott':
-        #     generator = GrayScott
-        # elif data_name == 'grayscottnetwork': # TODO: commented out for now bc unclear (noa regularization?)
-        #     generator = GrayScottNetwork
-            # generator.set_n_morphogens(**kwargs)
-            # generator.set_competitive(**kwargs)
         else:
             raise ValueError(f'Unknown data, `{data_name}`! Try `alon`.')
 
@@ -116,7 +106,7 @@ class SystemFamily():
         # general DE params
         self.device = device
         params = self.params_random(1)
-        DE_ex = DE(params=params[0], device=device, min_dims=self.min_dims, max_dims=self.max_dims, **kwargs)
+        DE_ex = DE(params=params[0], device=device, min_dims=self.min_dims, max_dims=self.max_dims, num_lattice=num_lattice, **kwargs)
         data_info = DE_ex.get_info()
         data_info = {**self.__dict__, **data_info} # merge dictionaries
         self.data_info = data_info
@@ -232,10 +222,6 @@ class SystemFamily():
             if not os.path.exists(dr):
                 os.makedirs(dr)
 
-        # all_params = []
-        # for rg in self.param_ranges:
-        #     all_params.append(np.random.rand(2*num_samples) * (rg[1] - rg[0]) + rg[0])
-        # all_params = np.array(all_params)
         all_params = self.params_random(2*num_samples).T
         
         for dt, dr, nm in zip([all_params[:, :num_samples], all_params[:, num_samples:]], [train_dir, test_dir], ['Train', 'Test']):
@@ -248,13 +234,6 @@ class SystemFamily():
                 fn = os.path.join(dr,  'flow%05i.pkl' % d)
                 with open(fn, 'wb') as f:
                     pickle.dump((flow, params), f)
-
-        # # params set upon data generation
-        # self.data_info['train_dir'] = train_dir
-        # self.data_info['test_dir'] = test_dir
-        # self.data_info['num_lattice'] = num_lattice
-        # self.data_info['min_dims'] = min_dims
-        # self.data_info['max_dims'] = max_dims
 
 ######################################## Param sampling methods ########################################################
 
@@ -360,20 +339,12 @@ class SystemFamily():
         plt.show()
 
 if __name__ == '__main__':
-    # sf = SystemFamily(data_name='simple_oscillator', param_ranges=[[-1, 1]], data_dir=None, device='cpu', min_dims=[-0.5, -0.5], max_dims=[0.5, 0.5])
     poly_order = 3
     dim = 2
     nparams = library_size(dim, poly_order=poly_order) * 2
-    # import pdb; pdb.set_trace()
-    # sf = SystemFamily(data_name='simple_oscillator', param_ranges=[[-2, 2]], data_dir=None, device='cpu')
     sf = SystemFamily(data_name='polynomial', param_ranges=[[-2, 2]] * nparams, data_dir=None, device='cpu', poly_order=poly_order)
-    # DE_inst = sf.DE(params=[1], **sf.data_info)
-    # DE_inst.plot_vector_field()
-    # plt.show()
     sf.plot_vector_fields(param_selection='random', num_samples=4, add_trajectories=True)
     plt.show()
-    # sf.plot_vector_fields(param_selection='sparse', num_samples=4, p=0.2)
-    # plt.show()
 
 
 

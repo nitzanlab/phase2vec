@@ -48,7 +48,7 @@ class FlowSystemODE(torch.nn.Module):
     eq_string = None
 
     def __init__(self, params=params, labels=labels, adjoint=False, solver_method='euler', train=False, device='cuda',
-                 num_lattice=28, min_dims=min_dims, max_dims=max_dims, boundary_type=None, boundary_radius=1e1, boundary_gain=1.0,time_direction=1, **kwargs):
+                 num_lattice=64, min_dims=min_dims, max_dims=max_dims, boundary_type=None, boundary_radius=1e1, boundary_gain=1.0,time_direction=1, **kwargs):
         """
         Initialize ODE. Defaults to a 2-dimensional system with a single parameter
 
@@ -316,48 +316,6 @@ class FlowSystemODE(torch.nn.Module):
         dy = pd.DataFrame(columns=self.polynomial_terms)
         return dx, dy
 
-    def curl(self, L):
-
-        if self.dim > 3:
-            raise ValueError('Curl is only defined for dim <=3.')
-        J = vmap(jacrev(self.forward,argnums=1),in_dims=(None,0))
-        Jx = J(torch.tensor(0.),L.reshape(-1,2))
-        dFxdy = Jx[:,0,1]
-        dFydx = Jx[:,1,0]
-
-        if self.dim < 3:
-            dFxdz = dFzdx = dFzdy = dFydz = torch.zeros_like(dFxdy)
-        else:
-            dFxdz = Jx[:,0,2]
-            dFydz = Jx[:,1,2]
-            dFzdx = Jx[:,2,0]
-        return torch.stack([dFzdy - dFydz, dFxdz - dFzdx, dFydx - dFxdy]).movedim(1,0)
-
-
-#    def forward(self, t, z):
-#        
-#        if self.bound_type == 'periodic':
-#            periodic = []
-#            for d in range(self.dim):
-#
-#                d_min = self.min_dims[d]
-#                d_max = self.max_dims[d]
-#                periodic.append(periodic_boundary(z[...,d],d_min,d_max))
-#            z = torch.stack(periodic).permute(*range(len(z.shape))[1:],0)
-#        zdot = self._forward(0,z)
-#
-#        if self.bound_type == 'soft_neumann':
-#            return (zdot * torch.sigmoid(self.boundary_gain*(self.bound - torch.norm(z,2,dim=-1,keepdim=True)))).float()
-#        else:
-#            return zdot#.float().float()
-#
-# def periodic_boundary(z,z_min,z_max):
-#     return ((z - z_min) % (z_max - z_min)) + z_min
-
-
-
-
-
 class SaddleNode(FlowSystemODE):
     """
     Saddle node bifurcation
@@ -474,8 +432,6 @@ class Homoclinic(FlowSystemODE):
         dy.loc['homoclinic']['$x_0x_1$'] = 4.
         return dx, dy
 
-
-
 class Transcritical(FlowSystemODE):
     """
     (Supercritical) pitchfork bifurcation:
@@ -543,36 +499,6 @@ class SimpleOscillator(FlowSystemODE):
 
         xdot = torch.cos(theta) * rdot - r * torch.sin(theta)
         ydot = torch.sin(theta) * rdot + r * torch.cos(theta)
-        zdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1)], dim=-1)
-        return zdot#.float()
-
-class NoisySimpleOscillator(FlowSystemODE):
-    """
-    Noisy Simple oscillator:
-
-        rdot = r * (a - r^2)
-        xdot = rdot * cos(theta) - r * sin(theta)
-        ydot = rdot * sin(theta) + r * cos(theta)
-
-    Where:
-        - a - angular velocity
-        - r - the radius of (x,y)
-        - theta - the angle of (x,y)
-    """
-
-    def forward(self, t, z, **kwargs):
-        x = z[..., 0]
-        y = z[..., 1]
-        w = z[...,2:]
-
-        r = torch.sqrt(x**2 + y**2)
-        theta = torch.atan2(y,  x)
-        rdot = r * (self.params[0] - r ** 2)
-        # thetadot = torch.tensor(-1.)
-
-        xdot = torch.cos(theta) * rdot - r * torch.sin(theta)
-        ydot = torch.sin(theta) * rdot + r * torch.cos(theta)
-        wdot = torch.normal
         zdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1)], dim=-1)
         return zdot#.float()
 
@@ -930,92 +856,6 @@ class HodgkinHuxley(FlowSystemODE): # TODO: not working
 
         zdot = torch.cat([Vmdot.unsqueeze(-1), ndot.unsqueeze(-1), mdot.unsqueeze(-1), hdot.unsqueeze(-1)], dim=-1)
         return zdot#.float()
-#        if self.bounded:
-#            return (zdot * torch.sigmoid(self.boundary_gain*(self.bound - torch.norm(z,2,dim=-1,keepdim=True)))).float()
-#        else:
-#            return zdot#.float()
-#
-
-class Kuramoto(FlowSystemODE):
-    """
-    System of oscillators, obtaining an intrinsic intrinsic and coupled frequencies:
-    Default is Kuramoto of two oscillators.
-    """
-
-    # params = torch.ones(( 30 )) #TODO: why 30?
-    dim = n_oscillators = 2
-    labels = [r'$\theta_%d$' % i for i in range(n_oscillators)]
-
-    min_dims = n_oscillators * [0.0]
-    max_dims = n_oscillators * [2 * math.pi]
-
-    #TODO: learning only couplings
-    n_params = (n_oscillators ** 2) + n_oscillators
-    recommended_param_ranges = [[0, 1]] * n_params
-
-    def set_n_oscillators(self, n_oscillators=None, labels=None, min_dims=None, max_dims=None, params=None):
-        self.dim = self.n_oscillators = n_oscillators
-        self.labels = [r'$\theta_%d$' % i for i in range(n_oscillators)] if labels is None else labels
-        self.min_dims = n_oscillators * [0.0] if min_dims is None else min_dims
-        self.max_dims = n_oscillators * [2 * math.pi] if max_dims is None else max_dims
-
-        num_couplings = self.n_oscillators ** 2
-        num_units = self.n_oscillators
-
-        self.n_params = (n_oscillators ** 2) + n_oscillators
-
-        if params is not None:
-            if len(params) != (num_couplings + num_units):
-                raise ValueError('Input params should be of length n_oscillators**2 + n_oscillators. '
-                                 'Currently configured to {} oscillators (expecting {} params), but given {} parameters'.format(self.n_oscillators, self.n_params, len(params)))
-            self.params = params[:num_couplings]
-            self.omega = params[-num_units:]
-        else:
-            self.params = torch.ones(num_couplings)
-            self.omega = torch.ones(num_units)
-
-
-        # num_couplings = int(np.sqrt(params.shape[0]))**2
-        # num_units = params.shape[0] - num_couplings
-        # self.params = self.params[:num_couplings]
-        # self.params = torch.nn.Parameter(params[:num_couplings], requires_grad=True) if train else params[:num_couplings]
-        # self.params = self.params.float()
-
-    def __init__(self, params=None, labels=None, min_dims=None, max_dims=None, n_oscillators=2, **kwargs):
-        # self.set_n_oscillators(n_oscillators, labels, min_dims, max_dims, params)
-        # TODO: constructor MUST be called first, need to fix!
-        super().__init__(params=self.params, labels=self.labels, min_dims=self.min_dims, max_dims=self.max_dims, **kwargs)
-
-        # num_couplings = int(np.sqrt(params.shape[0]))**2
-        # num_units = params.shape[0] - num_couplings
-        # self.params = self.params[:num_couplings]
-        # self.params = torch.nn.Parameter(params[:num_couplings], requires_grad=True) if train else params[:num_couplings]
-        # self.params = self.params.float()
-
-
-    def run(self, T, **kwargs):
-        self.omega = torch.randn(self.n_oscillators)*.5
-        return super().run(T, **kwargs)
-    
-    # def plot_trajectory(self, T, min_dims=min_dims, max_dims=max_dims, **kwargs):
-    #     super().plot_trajectory(T, min_dims=min_dims, max_dims=max_dims, **kwargs)
-
-    def forward(self, t, z, **kwargs):
-        z = z % (2 * math.pi)
-        z = z.unsqueeze(-2)
-        perm_dims = list(range(z.ndim - 2)) + [z.ndim-1, z.ndim-2]
-        phase_diffs = torch.sin(z.permute(*perm_dims) - z)
-        couplings = torch.tensor(self.params.reshape(self.n_oscillators, self.n_oscillators)) # TODO: added tensor (?)
-        zdot = (couplings * phase_diffs).sum(-2) + self.omega.to(self.device)
-        return zdot#.float()
-
-    def get_info(self, exclude=[]):
-        """
-
-        """
-        exclude = exclude + ['omega'] + super().exclude
-        return super().get_info(exclude)
-
 
 class Lorenz(FlowSystemODE):
     """
@@ -1084,6 +924,7 @@ class Linear(FlowSystemODE):
         return dx, dy
 
 class Conservative(FlowSystemODE):
+    '''Curl-free vector fields. Generated by creating a random scalar field and taking its gradient.'''
  
     recommended_param_ranges = 10*[[-3., 3.]]
     recommended_param_groups = [recommended_param_ranges]
@@ -1095,13 +936,17 @@ class Conservative(FlowSystemODE):
         L = self.generate_mesh(min_dims=self.min_dims, max_dims=self.max_dims, num_lattice=self.num_lattice)
         self.library, self.library_terms = sindy_library(L.reshape(self.num_lattice**self.dim, self.dim), self.poly_order,
                                       include_sine=include_sine, include_exp=include_exp)
+
+        self.library = self.library.float()
         self.params = torch.tensor(params).float()
     def forward(self, t, z, **kwargs):
+
         phi = torch.einsum('sl,l->s', self.library, self.params).reshape(self.num_lattice, self.num_lattice) # generate scalar field
         zdot = torch.stack([dphi for dphi in torch.gradient(phi,dim=[0,1])]).permute(1,2,0)
         return zdot#.float()
 
 class Incompressible(FlowSystemODE):
+    '''Divergence-free vector fields. Generated by taking the imaginary component of the derivate (in the complex sense) of a random holomorphic function.'''
     min_dims = [-1.,-1.]
     max_dims = [1., 1.]
     
@@ -1115,6 +960,7 @@ class Incompressible(FlowSystemODE):
         L = torch.flip(L,(-1,))
         self.im_unit = torch.sqrt(torch.tensor(-1).cfloat())
 
+        # Complex library
         cL = L[...,0].cfloat() + self.im_unit * L[...,1].cfloat()
         self.library, self.library_terms = sindy_library(cL.reshape(self.num_lattice**self.dim, 1), self.poly_order,
                                       include_sine=include_sine, include_exp=include_exp)
@@ -1125,11 +971,18 @@ class Incompressible(FlowSystemODE):
         # Convert params to complex
         params = self.params.reshape(-1,self.dim)
         params = (params[...,0].cfloat() + self.im_unit * params[...,1].cfloat()).unsqueeze(-1)
+
+        # Conformal map 
         f_z = torch.einsum('sl,ld->sd', self.library, params).reshape(self.num_lattice, self.num_lattice)
+
+        # real and imaginary parts of conformal map
         phi = torch.real(f_z)
         psi = torch.imag(f_z)
+
+        # Partials
         [dphi_dx,dphi_dy] = torch.gradient(phi,dim=[0,1])
         [dpsi_dx,dpsi_dy] = torch.gradient(psi,dim=[0,1])
+
         zdot = torch.cat([dphi_dx.unsqueeze(-1), dphi_dy.unsqueeze(-1)],dim=-1)
         return zdot
 
@@ -1237,97 +1090,6 @@ class NeuralODE(FlowSystemODE):
         if self.squeeze:
             x = x / torch.norm(x,2,dim=-1,keepdim=True)
         return x.reshape(-1, dim)
-
-
-
-# class GrayScottNetwork(FlowSystemODE):
-#     """
-#     Reaction equations of morphogens (Scholes et al.):
-
-#         F_i = V_i * P_i(x) + b_i - mu_i * x_i
-
-#         Where:
-#         - P_i = \prod_j 1 / (1 + k_ij/xj) ^ n_ij) - product over hill function
-#         - n_ij - hill coefficient
-#         - k_ij - connectivity (couplings)
-#         - V_i - max value of morphogen
-#         - b_i - const term
-#         - mu_i -
-
-#     """
-
-#     labels = ['A', 'B']
-#     params = np.array([ 100, # k11
-#                         100, # k12
-#                         100, # k21
-#                         0, ])# k22
-#     min_dims = [0.0, 0.0]
-#     max_dims = [400.0, 400.0]
-
-
-#     @staticmethod
-#     def non_competitive(z, K, H):
-#         H[K < 0] = -H[K < 0]
-#         P = torch.prod(1. / (1. + (K / z.unsqueeze(-2)) ** H), dim=-1)
-#         return P
-
-#     # @staticmethod
-#     # def competitive(z, K, H): # TODO: Not working :(
-#     #     A = ( K / z.unsqueeze(-2)) ** (-H)
-#     #     # A = (z.unsqueeze(-2) / K) ** H
-#     #     denom = 1. + torch.sum(A, dim=-1)
-#     #     K0 = K
-#     #     K0[K < 0] = 0
-#     #     B = (K0 / z.unsqueeze(-2)) ** (-H)
-#     #     nom = torch.sum(B, dim=-1)
-#     #     P = nom / denom
-#     #     return P
-
-#     activation = non_competitive
-
-
-#     def set_n_morphogens(self, n_morphogens=2, labels=None, min_dims=None, max_dims=None, params=None):
-#         self.dim = self.n_morphogens = n_morphogens
-#         self.labels = list('ABC'[:n_morphogens]) if labels is None else labels
-#         self.min_dims = n_morphogens * [0.0] if min_dims is None else min_dims
-#         self.max_dims = n_morphogens * [400.0] if max_dims is None else max_dims
-#         self.params = np.array([100, 0, 3.1623, 3.16230, 0, 0, 0.1, 0]) if params is None else params
-
-#     # @staticmethod
-#     # def set_competitive(to_competitive=True, **kwargs):
-#     #     if to_competitive:
-#     #         GrayScottNetwork.activation = GrayScottNetwork.competitive
-#     #     else:
-#     #         GrayScottNetwork.activation = GrayScottNetwork.non_competitive
-
-
-
-#     def __init__(self, params=None, labels=None, min_dims=min_dims, max_dims=max_dims, n_morphogens=2, **kwargs):
-#         self.set_n_morphogens(n_morphogens, labels, min_dims, max_dims, params)
-#         super().__init__(self.params, self.labels, min_dims=self.min_dims, max_dims=self.max_dims, **kwargs)
-#         # num_couplings = GrayScottNetwork.n_morphogens ** 2
-#         # num_other = self.params.shape[0] - num_couplings
-#         # self.params = self.params[:num_couplings]
-#         # self.other_params = self.params[-num_other:]
-#         self.N = torch.ones(self.n_morphogens, self.n_morphogens) * 2
-#         self.V = torch.tensor([3.1623] * self.n_morphogens)
-#         self.b = torch.tensor([0.1] * self.n_morphogens)
-#         self.mu = torch.tensor([0.01] * self.n_morphogens)
-
-#     def forward(self, t, z, **kwargs):
-#         # TODO: send to function to handle 3 params
-#         K = torch.tensor(self.params.reshape(self.n_morphogens, self.n_morphogens))
-
-#         if K.shape != self.N.shape: # TODO: at the end, become unequal shape, not sure why
-#             print('K and N of different shapes!')
-#         P = GrayScottNetwork.activation(z, K, self.N)
-#         zdot = self.V * P + self.b - self.mu * z
-
-#         return zdot#.float()
-
-# def stable_sigmoid(z):
-#     return torch.where(z<0,torch.exp(z) / (1 + torch.exp(z)), 1. / (1 + torch.exp(-1*z)))
-
 
 if __name__ == '__main__':
     
