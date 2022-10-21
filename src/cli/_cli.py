@@ -153,7 +153,7 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
 @click.option('--log-period', type=int, default=10)
 @click.option('--seed', type=int, default=0)
 @click.option('--config-file', type=click.Path())
-def call_train(data_config, net_config, exp_name, num_epochs, batch_size, beta, fp_normalize, poly_order, device, optimizer, learning_rate, momentum, model_save_dir, log_dir, log_period, seed, config_file):
+def call_train(data_config, net_config, exp_name, num_epochs, batch_size, beta, fp_normalize, device, optimizer, learning_rate, momentum, model_save_dir, log_dir, log_period, seed, config_file):
     """
     Train vector field embeddings
     """
@@ -174,10 +174,14 @@ def call_train(data_config, net_config, exp_name, num_epochs, batch_size, beta, 
 
     X_train, X_test, y_train, y_test, p_train, p_test = load_dataset(data_path)
 
-    model_type = net_info['model_type']
+    model_type = net_info['net_class']
     pretrained_path = net_info['pretrained_path']
-    del net_info['model_type']
+    AE = net_info['ae']
+    del net_info['net_class']
     del net_info['pretrained_path']
+    del net_info['ae']
+    del net_info['output_file']
+
     net = load_model(model_type, pretrained_path=pretrained_path, device=device, **net_info)
 
     net = train_model(X_train, X_test,
@@ -193,24 +197,22 @@ def call_train(data_config, net_config, exp_name, num_epochs, batch_size, beta, 
                       fp_normalize=fp_normalize,
                       device=device,
                       log_dir=log_dir,
-                      log_period=log_period)
+                      log_period=log_period,
+                      AE=AE)
 
     torch.save(net.state_dict(), os.path.join(model_save_dir, 'model.pt'))
 
 @cli.command(name="evaluate", help='Evaluates a trained model on a data set.')
-@click.argument('data-config', type=str)
+@click.argument('data-path', type=str)
 @click.argument('net-config', type=str)
 @click.argument('train-config', type=str)
 @click.option('--pretrained-path', type=str)
 @click.option('--results-dir', type=str)
 @click.option('--output-file', '-o', type=click.Path(), default='training_results.yaml')
-def evaluate(data_config, net_config, train_config, pretrained_path, results_dir, output_file):
+def evaluate(data_path, net_config, train_config, pretrained_path, results_dir, output_file):
 
-    data_info = read_yaml(data_config)
     net_info = read_yaml(net_config)
     train_info = read_yaml(train_config)
-
-    data_path = os.path.join(data_info['data_dir'], data_info['data_set_name'])
 
     if results_dir is None:
         results_dir = '.'
@@ -219,23 +221,27 @@ def evaluate(data_config, net_config, train_config, pretrained_path, results_dir
     output_file = os.path.join(results_dir, output_file)
 
     X_train, X_test, y_train, y_test, p_train, p_test = load_dataset(data_path)
-    model_type = net_info['model_type']
+    model_type = net_info['net_class']
     pretrained_path = net_info['pretrained_path'] if pretrained_path is None else os.path.join(pretrained_path,'model.pt')
-    del net_info['model_type']
+    AE = net_info['ae']
+    del net_info['net_class']
     del net_info['pretrained_path']
+    del net_info['ae']
+    del net_info['output_file']
+
     net = load_model(model_type, pretrained_path=pretrained_path, device=train_info['device'], **net_info)
 
     for i, (name, data, labels, pars) in enumerate(zip(['train', 'test'], [X_train, X_test],[y_train, y_test],[p_train, p_test])):
         losses, embeddings = run_epoch(data, labels, pars,
-                                   net, library, 0, None,
+                                   net, 0, None,
                                    train=False,
                                    batch_size=train_info['batch_size'],
                                    beta=train_info['beta'],
                                    fp_normalize=train_info['fp_normalize'],
                                    device=train_info['device'],
-                                   return_embeddings=True)
+                                   return_embeddings=True,
+                                   AE=AE)
 
-         
         np.save(os.path.join(results_dir,f'embeddings_{name}.npy'), embeddings.detach().cpu().numpy())
 
         loss_dict = {f'{name}_total_loss': str(np.mean(losses[0])), f'{name}_recon_loss': str(np.mean(losses[1])), f'{name}_sparsity_loss': str(np.mean(losses[2])), f'{name}_parameter_loss': str(np.mean(losses[3]))}
@@ -249,7 +255,7 @@ def evaluate(data_config, net_config, train_config, pretrained_path, results_dir
 @click.argument('data-path', type=str)
 @click.option('--feature-name', type=str, default='embeddings')
 @click.option('--classifier', type=click.Choice(['logistic_regressor', 'k_means']), default='logistic_regressor')
-@click.option('--results-dir', type=str)
+@click.option('--results-dir', type=str, default='.')
 @click.option('--penalty', type=str, default='l2')
 @click.option('--num-c', type=int, default=11)
 @click.option('--k', type=int, default=10)
@@ -303,6 +309,7 @@ def classify(data_path, feature_name, classifier, results_dir, penalty, num_c, k
 
 @cli.command(name="generate-net-config", help="Generates a configuration file that holds editable options for a deep net.")
 @click.option('--net-class', type=str, default='CNNwFC_exp_emb')
+@click.option('--ae', is_flag=True, default=False)
 @click.option('--latent-dim', type=int, default=100)
 @click.option('--in-shape', type=list, default=[2,64,64])
 @click.option('--num-conv-layers', type=int, default=3)
@@ -319,6 +326,8 @@ def classify(data_path, feature_name, classifier, results_dir, penalty, num_c, k
 @click.option('--dropout', is_flag=True, default=True)
 @click.option('--dropout-rate', type=float, default=.1)
 @click.option('--activation-type', type=str, default='relu')
+@click.option('--last-pad', is_flag=True, default=False)
+@click.option('--pretrained-path', type=str)
 @click.option('--output-file', '-o', type=click.Path(), default='net-config.yaml')
 def generate_net_config(**args):
     output_file = args['output_file']

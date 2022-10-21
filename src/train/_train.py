@@ -16,6 +16,7 @@ def train_model(X_train, X_test,
                 y_train, y_test,
                 p_train, p_test,
                 net, exp_name,
+                AE=False,
                 num_epochs = 5, 
                 learning_rate=1e-4, momentum=0.0,
                 optimizer='SGD',
@@ -50,7 +51,8 @@ def train_model(X_train, X_test,
                                batch_size=batch_size,
                                beta=beta,
                                fp_normalize=fp_normalize,
-                               device=device)
+                               device=device,
+                               AE=AE)
             
             avg_losses = [np.mean(loss) for loss in losses]
 
@@ -68,7 +70,8 @@ def run_epoch(data, labels, gt_pars, net, epoch, opt,
               beta=1e-3,
               fp_normalize=False,
               device='cuda', 
-              return_embeddings=False):
+              return_embeddings=False,
+              AE=False):
 
     '''One pass through either the training, validating or testing data.'''
     tloss_history  = []
@@ -77,7 +80,8 @@ def run_epoch(data, labels, gt_pars, net, epoch, opt,
     ploss_history  = []
     embeddings     = []
 
-    library = net.library
+    if not AE:
+        library = net.library
 
     if train:
         net.train()
@@ -100,26 +104,35 @@ def run_epoch(data, labels, gt_pars, net, epoch, opt,
             opt.zero_grad()
         
         # Forward pass
-        z    = net.emb(net.conv(batch).reshape(effective_batch_size, -1))
-        pars  = net.fc(z)
-        pars = pars.reshape(-1,library.shape[-1], dim)
+        z    = net.emb(net.enc(batch).reshape(effective_batch_size, -1))
+        out  = net.dec(z)
+
+        if not AE:
+            # Reconstruction using fn dictionary
+            pars = out.reshape(-1,library.shape[-1], dim)
+            recon = torch.einsum('sl,bld->bsd',library.to(device),pars).reshape(effective_batch_size, num_lattice,num_lattice,dim).permute(0,3,1,2)
+            par_loss = euclidean_loss(pars,batch_pars)
+        else:
+            recon = out.reshape(*batch.shape)
+            par_loss = torch.tensor(0.0)
 
         # Save embeddings? 
         if return_embeddings:
             embeddings.append(z)
 
-        # Reconstruction using fn dictionary
-        recon = torch.einsum('sl,bld->bsd',library.to(device),pars).reshape(effective_batch_size, num_lattice,num_lattice,dim).permute(0,3,1,2)
-        
         recon_loss      = euclidean(recon, batch)
 
-        # Sparsity
-        sparsity_loss   = pars.reshape(effective_batch_size, -1).abs().mean(1)
-        gt_sparsity     = batch_pars.reshape(effective_batch_size, -1).abs().mean(1)
-        vis_sparsity    = (sparsity_loss / gt_sparsity).mean()
+        if not AE:
+            # Sparsity
+            sparsity_loss   = pars.reshape(effective_batch_size, -1).abs().mean(1)
+            gt_sparsity     = batch_pars.reshape(effective_batch_size, -1).abs().mean(1)
+            vis_sparsity    = (sparsity_loss / gt_sparsity).mean()
+        else:
+            sparsity_loss = torch.tensor(0.0)
+            vis_sparsity  = torch.tensor(0.0)
+
         total_loss      = recon_loss + beta * sparsity_loss.mean()
 
-        par_loss = euclidean_loss(pars,batch_pars)
         if train:
             total_loss.backward()
             opt.step()
