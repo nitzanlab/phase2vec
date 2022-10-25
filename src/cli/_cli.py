@@ -52,8 +52,10 @@ help="Generates a data set of vector fields.")
 @click.option('--num_lattice', '-n', type=int, default=64)
 @click.option('--min-dims', '-mi', type=list, default=[-1.,-1.])
 @click.option('--max-dims', '-ma', type=list, default=[1.,1.])
+@click.option('--noise-type', '-nt', type=click.Choice([None, 'gaussian', 'masking', 'parameter']), default=None)
+@click.option('--noise-mag', '-n', type=float, default=0.0)
 @click.option('--config-file', type=click.Path())
-def generate_dataset(data_dir, data_set_name, system_names, num_samples, samplers, system_props, val_size, num_lattice, min_dims, max_dims, config_file):
+def generate_dataset(data_dir, data_set_name, system_names, num_samples, samplers, system_props, val_size, num_lattice, min_dims, max_dims, noise_type, noise_mag, config_file):
     """
     Generates train and test data for one data set
 
@@ -68,15 +70,14 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
     num_lattice (int): number of points for all dimensions in the equally spaced grid on which velocity is measured
     min_dims (list of floats): the lower bounds for each dimension in phase space
     max_dims (list of floats): the upper bounds for each dimension in phase space
-
+    moise_type (None, 'gaussian', 'masking', 'parameter'): type of noise to apply to the data, including None. Gaussian means white noise on the vector field; masking means randomly zeroing out vectors; parameter means gaussian noise added to the parameters
+    noise_mag (float): amount of noise, interpreted differently according to each noise type. If gaussian, then the std of the applied noise relative to each vector field's natural std; if masking, proportio to be masked; if parameter, then just the std of applied noise. 
     """
 
     # Living dangerously
     import warnings
     warnings.filterwarnings("ignore")
-    # TODO: For now, no control here over param ranges, min or max dims. Just use sf defaults
     # TODO: Add noise params
-    # TODO: Add control for poly params
 
     save_dir = os.path.join(data_dir, data_set_name)
     ensure_dir(save_dir)
@@ -88,6 +89,10 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
     sfs = [SystemFamily(data_name=system_name, default_sampler=sampler, num_lattice=num_lattice, min_dims=min_dims, max_dims=max_dims) for (system_name, sampler) in zip(system_names, samplers)]
     num_labels_per_group = [len(sf.param_groups) for sf in sfs]
     cum_labels_per_group = [0] + list(np.cumsum(num_labels_per_group))[:-1]
+
+    L = sfs[0].L
+    dim = len(min_dims)
+    library, library_terms = sindy_library(L.reshape(num_lattice**dim, dim), poly_order=3)
 
     # For each system
     for d, system_name in enumerate(system_names):
@@ -114,6 +119,8 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
                 else:
                     current_exemplars += 1
                     datum     = system.forward(0,sf.L)
+
+                    # Label relative to the total collection of systems
                     label     = system.label + cum_labels_per_group[d]
 
                     # If system doesn't have a closed from in the dictionary, approximate its coefficients with least squares
@@ -121,7 +128,18 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
                         dx, dy = system.fit_polynomial_representation(poly_order=3)
                     else:
                         dx, dy = system.get_polynomial_representation()
+
                     save_pars = torch.cat((torch.tensor(dx.to_numpy()), torch.tensor(dy.to_numpy()))).transpose(1,0).float()
+                    
+                    # Add noise
+                    if noise_type == 'gaussian':
+                        datum_std = datum.std()
+                        datum += (datum_std * noise_mag) * torch.randn_like(datum)
+                    elif noise_type == 'masking':
+                        datum *= 1.*(torch.rand_like(datum) < noise_mag)
+                    elif noise_type == 'parameter':
+                        save_pars += noise_mag * torch.randn_like(save_pars)
+                        datum = torch.einsum('sl,ld->sd', library, save_pars).reshape(*datum.shape)
 
                     all_data.append(datum)
                     all_pars.append(save_pars)

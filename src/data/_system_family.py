@@ -116,7 +116,7 @@ class SystemFamily():
         self.DE_ex = DE_ex
         if self.data_name != 'grayscott': # TODO: ask isinstance(generator, ODE/PDE)
             # TODO: can generator.param can be used as default?
-            self.L = self.DE_ex.generate_mesh(num_lattice=num_lattice) # min_dims, max_dims, num_lattice
+            self.L = self.DE_ex.generate_mesh(num_lattice=num_lattice, min_dims=self.min_dims, max_dims=self.max_dims) # min_dims, max_dims, num_lattice
             self.L = self.L.to(device).float()
 
         self.kwargs = kwargs

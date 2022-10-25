@@ -188,19 +188,14 @@ class FlowSystemODE(torch.nn.Module):
         #     plt.show()
         #     plt.close()
 
-
     def generate_mesh(self, min_dims=None, max_dims=None, num_lattice=None):
         """
         Creates a lattice over coordinate range
         """
-        min_dims, max_dims, num_lattice = self.get_lattice_params(min_dims, max_dims, num_lattice)
-
-        spatial_coords = [np.linspace(mn, mx, num_lattice) for (mn, mx) in zip(min_dims, max_dims)]
+        spatial_coords = [torch.linspace(mn, mx, num_lattice) for (mn, mx) in zip(min_dims, max_dims)]
         # TODO: This is used because pytorch 1.9.0 does not have an indexing keyword argument which can we used to switch to xy ordering for the mesh. We should update to pytorch 1.10.0. 
-        mesh = np.meshgrid(*spatial_coords)
-        L = np.concatenate([ms[..., None] for ms in mesh], axis=-1)
-        return torch.from_numpy(L)
-
+        mesh = torch.meshgrid(*spatial_coords,indexing='ij')
+        return torch.cat([ms[..., None] for ms in mesh], axis=-1)
 
     def plot_trajectory(self, T=None, alpha=None, min_dims=None, max_dims=None, num_lattice=None, ax=None, which_dims=[0,1], title=''):
         """
@@ -277,7 +272,7 @@ class FlowSystemODE(torch.nn.Module):
             raise ValueError('Polynomial representation only implemented for 2D systems')
         poly_order = poly_order if poly_order else self.poly_order
         # defaults to least square fitting
-        L = self.generate_mesh()
+        L = self.generate_mesh(num_lattice=self.num_lattice, min_dims=self.min_dims, max_dims=self.max_dims)
         z = self.forward(0, torch.tensor(L).float().reshape(-1, self.dim)).reshape(self.num_lattice, self.num_lattice, self.dim)
         zx = z[:,:,0].numpy().flatten()
         zy = z[:,:,1].numpy().flatten()
