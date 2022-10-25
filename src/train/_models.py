@@ -108,7 +108,7 @@ class CNNwFC_exp_emb(nn.Module):
 
         with torch.no_grad():
             x = torch.rand(1, *in_shape)
-            y = self.env(x)
+            y = self.enc(x)
             self.out_shape = y.shape[1:]
             self.out_size = torch.prod(torch.tensor(y.shape))
 
