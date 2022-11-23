@@ -82,7 +82,7 @@ class FlowSystemODE(torch.nn.Module):
         self.polynomial_terms = sindy_library(torch.ones((1, self.dim)), poly_order=3, include_sine=False, include_exp=False)[1]
 
 
-    def run(self, T, alpha, init=None,return_summed=False):
+    def run(self, T, alpha, init=None,clip=True):
         """
         Run system
 
@@ -96,16 +96,10 @@ class FlowSystemODE(torch.nn.Module):
         init = torch.zeros(self.dim) if init is None else init
         T = T * self.time_direction
         grid = torch.linspace(0, T, abs(int(T / alpha)))
-        boundary_dict = {'boundary_type':self.boundary_type, 
-                         'boundary_radius':self.boundary_radius,
-                         'boundary_gain':self.boundary_gain, 
-                         'boundary_box':self.boundary_box}
-        trajectory = self.solver(self, init, grid, rtol=1e-3, atol=1e-5, options=boundary_dict, method=self.solver_method)
-        if return_summed:
-            return trajectory[-1].reshape(-1,self.dim).sum(0)
-        else:
-            return trajectory
-
+        trajectory = self.solver(self, init, grid, rtol=1e-3, atol=1e-5, method=self.solver_method)
+        if clip:
+            trajectory = torch.cat([torch.clamp(trajectory[:,:,i].unsqueeze(-1), min=self.min_dims[i], max=self.max_dims[i]) for i in range(self.dim)],dim=2)
+        return trajectory
 
     def get_lattice_params(self, min_dims=None, max_dims=None, num_lattice=None):
         """
@@ -660,8 +654,8 @@ class LotkaVolterra(FlowSystemODE):
     min_dims = [-1.,-1.]
     max_dims = [1.,1.]
 
-    recommended_param_ranges = [[0.,2.]] 
-    recommended_param_groups = [[[0.,1.]], [[1.,2.]]]
+    recommended_param_ranges = [[.1,1.0]] 
+    recommended_param_groups = [[[.1,1.0]]]
 
     def forward(self, t, z, **kwargs):
         x = z[...,0]
@@ -669,10 +663,10 @@ class LotkaVolterra(FlowSystemODE):
 
         mu = self.params[0]
 
-        v = 12*(x + 1)
-        w = 6*(y + 1)
-        xdot = v * (1-w)
-        ydot = mu * w * (v  -1)
+        v = 2*(x + 1)
+        w = 1*(y + 1)
+        xdot = (v * (1-w))
+        ydot = (mu * w * (v  -1))
 
         zdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1)], dim=-1)
         return zdot
@@ -686,7 +680,6 @@ class LotkaVolterra(FlowSystemODE):
         dy.loc['lotkavolterra']['$x_1$'] = -1*params[0]
         dy.loc['lotkavolterra']['$x_0x_1$'] = params[0]
         return dx, dy
-        
 
 class FitzHughNagumo(FlowSystemODE):
     """

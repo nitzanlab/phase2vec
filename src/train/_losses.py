@@ -20,15 +20,17 @@ def slice_to_loss(recon_x, x, pad):
 
 ################################################## Reconstruction losses ###############################################
 
-def euclidean_loss(recon_x, x, pad=0):
+def euclidean_loss(recon_x, x, pad=0, reduce=True):
     """
     Euclidean loss
     """
     recon_x, x = slice_to_loss(recon_x, x, pad)
-    return ((recon_x - x) ** 2).mean()
+    if reduce:
+        return ((recon_x - x) ** 2).mean()
+    else:
+        return ((recon_x - x) ** 2)
 
-
-def normalized_euclidean(recon,gt, eps=1e-5, norm_type='single', measurement='speed'):
+def normalized_euclidean(recon,gt, eps=1e-5, norm_type='single', measurement='speed', reduce=True):
 
     '''Euclidean distance between two arrays with spatial dimensions. Normalizes pointwise across the spatial dimension by the norm of the second argument'''
     batch_size =recon.shape[0]
@@ -60,8 +62,10 @@ def normalized_euclidean(recon,gt, eps=1e-5, norm_type='single', measurement='sp
     else:
         raise ValueError('Denominator type not recognized!')
 
-
     # normalize pointwise by gt norm
-    d = torch.sqrt((((recon- gt)**2) / den).reshape(batch_size,-1).mean(1))
-
-    return d.mean()
+    if reduce:
+        d = torch.sqrt((((recon- gt)**2) / den).reshape(batch_size,-1).mean(1))
+        return d.mean()
+    else:
+        d = torch.sqrt((((recon- gt)**2) / den))
+        return d

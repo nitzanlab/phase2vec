@@ -131,7 +131,7 @@ def run_epoch(data, labels, gt_pars, net, epoch, opt,
             sparsity_loss = torch.tensor(0.0)
             vis_sparsity  = torch.tensor(0.0)
 
-        total_loss      = recon_loss + beta * sparsity_loss.mean()
+        total_loss  = recon_loss + beta * sparsity_loss.mean()
 
         if train:
             total_loss.backward()
