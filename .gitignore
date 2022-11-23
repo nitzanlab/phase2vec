@@ -3,7 +3,6 @@
 ./tmp.py
 src/__pycache__
 src/config.cfg
-<<<<<<< HEAD
 *.xml
 *.pkl
 *.pyc
