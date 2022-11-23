@@ -72,7 +72,7 @@ class SystemFamily():
 
         return generator
 
-    def __init__(self, data_name, data_dir=None, device=None, min_dims=None, max_dims=None, num_lattice=64, param_ranges=None, param_groups=None, default_sampler='uniform', **kwargs):
+    def __init__(self, data_name, data_dir=None, device=None, min_dims=None, max_dims=None, num_lattice=64, param_ranges=None, param_groups=None, default_sampler='uniform', seed=0, **kwargs):
         """
         Generate a system family
         :param data_name: name of system
@@ -83,6 +83,13 @@ class SystemFamily():
         :param max_dims: maximum range of dimensions to use
         :param kwargs: any arguments of a general system
         """
+
+        # Reproducibility
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        import random
+        random.seed(seed)
+
         self.data_name = data_name
         self.pde = False
          

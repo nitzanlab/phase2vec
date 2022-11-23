@@ -7,7 +7,6 @@ import numpy as np
 from functools import partial
 
 from src.train import train_model, run_epoch, load_model
-from src.plotting import Visualizer, VisualizerGridsearch
 
 from src.gridsearch import generate_gridsearch_worker_params, get_gridsearch_default_scans, results_to_df
 from src.gridsearch import wrap_command_with_local, wrap_command_with_slurm, write_jobs
@@ -17,7 +16,7 @@ from src.data import SystemFamily, sindy_library, load_dataset
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.metrics import classification_report
-
+from scipy.stats import binned_statistic_2d
 import torch
 
 # Here we will monkey-patch click Option __init__
@@ -49,13 +48,17 @@ help="Generates a data set of vector fields.")
 @click.option('--samplers', '-sp', type=str, multiple=True, default=['uniform'])
 @click.option('--system-props', '-c', type=float, multiple=True, default=[1.0])
 @click.option('--val-size', '-t', type=float, default=.25)
-@click.option('--num_lattice', '-n', type=int, default=64)
+@click.option('--num-lattice', '-n', type=int, default=64)
 @click.option('--min-dims', '-mi', type=list, default=[-1.,-1.])
 @click.option('--max-dims', '-ma', type=list, default=[1.,1.])
-@click.option('--noise-type', '-nt', type=click.Choice([None, 'gaussian', 'masking', 'parameter']), default=None)
+@click.option('--noise-type', '-nt', type=click.Choice([None, 'gaussian', 'masking', 'parameter', 'trajectory']), default=None)
 @click.option('--noise-mag', '-n', type=float, default=0.0)
+@click.option('--tt', '-t', type=float, default=1.0)
+@click.option('--alpha', '-a', type=float, default=0.01)
+@click.option('--seed', '-se', type=int, default=0)
+@click.option('--holdout-forms-path', '-h', type=click.Path(), default=None)
 @click.option('--config-file', type=click.Path())
-def generate_dataset(data_dir, data_set_name, system_names, num_samples, samplers, system_props, val_size, num_lattice, min_dims, max_dims, noise_type, noise_mag, config_file):
+def generate_dataset(data_dir, data_set_name, system_names, num_samples, samplers, system_props, val_size, num_lattice, min_dims, max_dims, noise_type, noise_mag, tt, alpha, seed, holdout_forms_path, config_file):
     """
     Generates train and test data for one data set
 
@@ -72,12 +75,18 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
     max_dims (list of floats): the upper bounds for each dimension in phase space
     moise_type (None, 'gaussian', 'masking', 'parameter'): type of noise to apply to the data, including None. Gaussian means white noise on the vector field; masking means randomly zeroing out vectors; parameter means gaussian noise added to the parameters
     noise_mag (float): amount of noise, interpreted differently according to each noise type. If gaussian, then the std of the applied noise relative to each vector field's natural std; if masking, proportio to be masked; if parameter, then just the std of applied noise. 
+    seed (int): random seed
     """
+
+    # Reproducibility
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    import random
+    random.seed(seed)
 
     # Living dangerously
     import warnings
     warnings.filterwarnings("ignore")
-    # TODO: Add noise params
 
     save_dir = os.path.join(data_dir, data_set_name)
     ensure_dir(save_dir)
@@ -86,13 +95,17 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
     all_labels = []
     all_pars   = []
 
-    sfs = [SystemFamily(data_name=system_name, default_sampler=sampler, num_lattice=num_lattice, min_dims=min_dims, max_dims=max_dims) for (system_name, sampler) in zip(system_names, samplers)]
+    sfs = [SystemFamily(data_name=system_name, default_sampler=sampler, num_lattice=num_lattice, min_dims=min_dims, max_dims=max_dims, seed=seed) for (system_name, sampler) in zip(system_names, samplers)]
     num_labels_per_group = [len(sf.param_groups) for sf in sfs]
     cum_labels_per_group = [0] + list(np.cumsum(num_labels_per_group))[:-1]
 
     L = sfs[0].L
     dim = len(min_dims)
     library, library_terms = sindy_library(L.reshape(num_lattice**dim, dim), poly_order=3)
+
+    # Holdout-forms
+    if holdout_forms_path is not None:
+        holdout_forms = np.load(holdout_forms_path)
 
     # For each system
     for d, system_name in enumerate(system_names):
@@ -106,41 +119,82 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
         system_samples = int(system_props[d] * num_samples)
         class_samples  = int(system_samples / float(num_classes))
 
+        noise_diffs = []
+
         # For each class in the system
         for c in range(num_classes):
             current_exemplars = 0
             # Until you have the right number of exemplars from this class
             while current_exemplars < class_samples:
-                gen_par = sf.param_sampler(1)[0]
-                system  = sf.generate_model(gen_par)
-                if system.label != c:
-                    # If wrong label, get another sample
-                    continue
-                else:
-                    current_exemplars += 1
-                    datum     = system.forward(0,sf.L)
-
-                    # Label relative to the total collection of systems
-                    label     = system.label + cum_labels_per_group[d]
-
-                    # If system doesn't have a closed from in the dictionary, approximate its coefficients with least squares
-                    if system_name in ['simple_oscillator', 'alon', 'conservative', 'incompressible']:
-                        dx, dy = system.fit_polynomial_representation(poly_order=3)
+                bad_form = True
+                while bad_form:
+                    gen_par = sf.param_sampler(1)[0]
+                    system  = sf.generate_model(gen_par)
+                    if system.label != c:
+                        # If wrong label, get another sample
+                        continue
                     else:
-                        dx, dy = system.get_polynomial_representation()
+                        current_exemplars += 1
+                        datum     = system.forward(0,sf.L)
 
-                    save_pars = torch.cat((torch.tensor(dx.to_numpy()), torch.tensor(dy.to_numpy()))).transpose(1,0).float()
-                    
-                    # Add noise
-                    if noise_type == 'gaussian':
-                        datum_std = datum.std()
-                        datum += (datum_std * noise_mag) * torch.randn_like(datum)
-                    elif noise_type == 'masking':
-                        datum *= 1.*(torch.rand_like(datum) < noise_mag)
-                    elif noise_type == 'parameter':
-                        save_pars += noise_mag * torch.randn_like(save_pars)
-                        datum = torch.einsum('sl,ld->sd', library, save_pars).reshape(*datum.shape)
+                        # Label relative to the total collection of systems
+                        label     = system.label + cum_labels_per_group[d]
+                        #print(label)
 
+                        # If system doesn't have a closed from in the dictionary, approximate its coefficients with least squares
+                        if system_name in ['simple_oscillator', 'alon', 'conservative', 'incompressible']:
+                            dx, dy = system.fit_polynomial_representation(poly_order=3)
+                        else:
+                            dx, dy = system.get_polynomial_representation()
+
+                        save_pars = torch.cat((torch.tensor(dx.to_numpy()), torch.tensor(dy.to_numpy()))).transpose(1,0).float()
+                        
+                        # Add noise
+                        if noise_type == 'gaussian':
+                            datum_std = datum.std()
+                            datum += (datum_std * noise_mag) * torch.randn_like(datum)
+                        elif noise_type == 'masking':
+                            datum *= 1.*(torch.rand_like(datum) > noise_mag)
+                        elif noise_type == 'parameter':
+                            save_pars += noise_mag * torch.randn_like(save_pars)
+                            datum = torch.einsum('sl,ld->sd', library, save_pars).reshape(*datum.shape)
+                        elif noise_type == 'trajectory':
+
+                            # Initial conditions
+                            num_inits = int(noise_mag)
+                            init_x = torch.rand(num_inits) * (max_dims[0] - min_dims[0]) + min_dims[0]
+                            init_y = torch.rand(num_inits) * (max_dims[1] - min_dims[1]) + min_dims[1]
+                            init = torch.stack([init_x, init_y]).transpose(1,0)
+
+                            # Trajectories
+                            trajectories = system.run(tt, alpha, init=init)
+                            trajectories = trajectories.numpy()
+
+                            mids = np.array([.5 * (trajectories[i+1] + trajectories[i]) for i in range(len(trajectories) - 1)]).reshape(-1,2)
+
+                            # Velocities
+                            v = np.diff(trajectories, axis=0).reshape(-1,2) / alpha
+
+                            # Binning
+                            ret_x = binned_statistic_2d(mids[:,0], mids[:,1], v[:,0], bins=num_lattice)
+                            ret_y = binned_statistic_2d(mids[:,0], mids[:,1], v[:,1], bins=num_lattice)
+
+                            v_x = ret_x.statistic
+                            v_y = ret_y.statistic
+
+                            old_datum = datum.clone()
+
+                            datum = np.array([v_x,v_y]).transpose(1,2,0)
+                            datum = np.where(np.isnan(datum), np.zeros_like(datum), datum)
+                            noise_diffs.append(np.sqrt(((old_datum - datum)**2).sum()))
+                            datum = torch.tensor(datum)
+
+                        if holdout_forms_path is not None:
+                            # Test for bad form
+                            form = (1*(save_pars != 0)).numpy()
+                            bad_form = np.any(np.all(form == holdout_forms))
+                        else:
+                            bad_form = False
                     all_data.append(datum)
                     all_pars.append(save_pars)
                     all_labels.append(label)
@@ -149,10 +203,16 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
     all_pars   = torch.stack(all_pars).numpy()
     all_labels = np.array(all_labels)
 
-    split = train_test_split(all_data, all_labels, all_pars, test_size=val_size, stratify=all_labels)
+    split = train_test_split(all_data, all_labels, all_pars, test_size=val_size, stratify=all_labels, random_state=seed)
 
-    for dt, nm in zip(split, ['X_train', 'X_val', 'y_train', 'y_val', 'p_train', 'p_val']):
+    for dt, nm in zip(split, ['X_train', 'X_test', 'y_train', 'y_test', 'p_train', 'p_test']):
         np.save(os.path.join(save_dir, nm + '.npy'), dt)
+
+    # Unique forms
+    redundant_forms = 1* (all_pars != 0)
+    unique_forms    = np.unique(redundant_forms, axis=0)
+
+    np.save(os.path.join(save_dir, 'forms.npy'), unique_forms)
 
 @cli.command(name='train', cls=command_with_config('config_file'), help='train a VAE to learn reduced models')
 @click.argument("data-config", type=click.Path())
@@ -287,8 +347,8 @@ def classify(data_path, feature_name, classifier, results_dir, penalty, num_c, k
 
     X_train, X_test, y_train, y_test, p_train, p_test = load_dataset(data_path)
 
-    z_train = np.load(os.path.join(results_dir, f'{feature_name}_train.npy'))
-    z_test = np.load(os.path.join(results_dir, f'{feature_name}_test.npy'))
+    z_train = np.load(os.path.join(results_dir, f'{feature_name}_train.npy')).reshape(X_train.shape[0], -1)
+    z_test = np.load(os.path.join(results_dir, f'{feature_name}_test.npy')).reshape(X_test.shape[0], -1)
 
     Cs = np.logspace(-5, 5, num_c)
     kf = KFold(n_splits=int(len(y_train) / float(k)))

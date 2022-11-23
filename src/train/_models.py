@@ -82,7 +82,7 @@ class CNNwFC(nn.Module):
         else:
             x = self.enc(x)
         x = x.reshape(-1, self.out_size)
-        return self.fc(x)
+        return self.dec(x)
 
 class CNNwFC_exp_emb(nn.Module):
     def __init__(self, in_shape, poly_order=3, latent_dim=64,
@@ -138,7 +138,7 @@ class CNNwFC_exp_emb(nn.Module):
         else:
             x = self.enc(x)
         x = x.reshape(-1, self.out_size)
-        return self.fc(self.emb(x))
+        return self.dec(self.emb(x))
 
 class Conv2dAE(nn.Module):
     def __init__(self, in_shape, latent_dim=64,

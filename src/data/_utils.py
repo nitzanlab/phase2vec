@@ -5,16 +5,16 @@ import os
 def load_dataset(data_path):
     # Load data
     X_train = np.load(os.path.join(data_path, 'X_train.npy'))
-    X_val = np.load(os.path.join(data_path, 'X_val.npy'))
+    X_test = np.load(os.path.join(data_path, 'X_test.npy'))
 
     # Load labels
     y_train = np.load(os.path.join(data_path, 'y_train.npy'))
-    y_val = np.load(os.path.join(data_path, 'y_val.npy'))
+    y_test = np.load(os.path.join(data_path, 'y_test.npy'))
 
     # Load pars
     p_train = np.load(os.path.join(data_path, 'p_train.npy'))
-    p_val = np.load(os.path.join(data_path, 'p_val.npy'))
-    return X_train, X_val, y_train, y_val, p_train, p_val
+    p_test = np.load(os.path.join(data_path, 'p_test.npy'))
+    return X_train, X_test, y_train, y_test, p_train, p_test
 
 def jacobian(f,spacings=1):
     '''Returns the Jacobian of a batch of planar vector fields shaped batch x dim x spatial x spatial'''
