@@ -24,7 +24,7 @@ def train_model(X_train, X_test,
                 beta=1e-3,
                 fp_normalize=False,
                 device='cuda',
-                log_dir='/home/mgricci/runs',
+                log_dir='./runs',
                 log_period = 10):
 
     '''Train net.'''
