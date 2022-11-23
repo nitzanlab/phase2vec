@@ -3,15 +3,10 @@
 ./tmp.py
 src/__pycache__
 src/config.cfg
-*.swm
-*.swn
-*.swo
-*.swp
-*.swk
-*.swl
 *.xml
 *.pkl
 *.pyc
+*.sw*
 output/*
 *.pt
 src/*/__pycache__/*
