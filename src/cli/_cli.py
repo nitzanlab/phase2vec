@@ -343,8 +343,6 @@ def evaluate(data_path, net_config, train_config, pretrained_path, results_dir, 
 @click.option('--output-file', '-o', type=click.Path(), default='classifier_results.yaml')
 def classify(data_path, feature_name, classifier, results_dir, penalty, num_c, k, multi_class, verbose, seed, output_file):
 
-    output_file = os.path.join(results_dir, output_file)
-
     X_train, X_test, y_train, y_test, p_train, p_test = load_dataset(data_path)
 
     z_train = np.load(os.path.join(results_dir, f'{feature_name}_train.npy')).reshape(X_train.shape[0], -1)
@@ -379,11 +377,14 @@ def classify(data_path, feature_name, classifier, results_dir, penalty, num_c, k
         num_classes = len(np.unique(y_train))
         clf = KMeans(n_clusters=num_classes, random_state=seed).fit(z_train)
 
-    y_pred = clf.predict(z_test)
-    report = classification_report(y_test, y_pred, output_dict=True)
-    for (key, value) in report.items():
+    for nm, lb_true, lb_pred in zip(['train', 'test'], [y_train, y_test], [clf.predict(z_train), clf.predict(z_test)]):
+        report = classification_report(lb_true, lb_pred, output_dict=True)
+
+        fn = os.path.join(results_dir, f'{nm}_' + output_file)
+        for (key, value) in report.items():
             print(key + f': {value}')
-    write_yaml(output_file, report)
+        write_yaml(fn, report)
+        print('\n')
 
 @cli.command(name="generate-net-config", help="Generates a configuration file that holds editable options for a deep net.")
 @click.option('--net-class', type=str, default='CNNwFC_exp_emb')
