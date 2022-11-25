@@ -17,13 +17,11 @@ Install this repo
 
 For *production* usage:
 ```
-pip install git+https://github.com/nitzanlab/phase2vec.git     # if you like to use git over https
-pip install git+ssh://git@github.com/nitzanlab/phase2vec.git   # if you like to use git over ssh
+pip install git+https://github.com/nitzanlab/phase2vec.git  
 ```
 OR for *development* usage:
 ```
 git clone https://github.com/nitzanlab/phase2vec.git     # if you like to use git over https
-git clone ssh://git@github.com/nitzanlab/phase2vec.git   # if you like to use git over ssh
 
 pip install -e phase2vec
 ```
