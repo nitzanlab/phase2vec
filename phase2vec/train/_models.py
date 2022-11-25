@@ -3,13 +3,8 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-from torchdiffeq import odeint, odeint_adjoint
 from ._layers import convNd, MLP, CNN, dCNN
-from src.data import sindy_library
-import pdb
-
-from pl_bolts.models.autoencoders.components import resnet18_decoder, resnet18_encoder
-
+from phase2vec.data import sindy_library
 
 def load_model(model_type, pretrained_path=None, device='cpu', **kwargs):
     """load_model: loads a neural network which maps from flows to either flows or parameters

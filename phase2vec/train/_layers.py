@@ -265,6 +265,7 @@ class dCNN(nn.Module):
 
     def forward(self, x):
         return self.deconv_layers(x)
+
 class CNN(nn.Module):
     def __init__(self, in_shape, num_conv_layers=1,
             kernel_sizes=[], kernel_features=[],
@@ -308,6 +309,7 @@ class CNN(nn.Module):
 
     def forward(self, x):
         return self.conv_layers(x)
+
 class MLP(nn.Module):
     def __init__(self, in_dim, out_dim, num_hid_layers=1, hid_dims=[64], batch_norm=False, dropout=False, dropout_rate=.5, activation_type='relu'):
         super(MLP, self).__init__()

@@ -1,9 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-from numba import jit
 from torch.autograd import Function
-
 
 def slice_to_loss(recon_x, x, pad):
     """

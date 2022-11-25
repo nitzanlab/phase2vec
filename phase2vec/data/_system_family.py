@@ -4,7 +4,7 @@ import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from src.data._odes import *
+from phase2vec.data._odes import *
 
 class SystemFamily():
     """

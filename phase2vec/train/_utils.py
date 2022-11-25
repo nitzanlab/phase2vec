@@ -2,7 +2,6 @@ import os
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-#from src.data import SystemFamilyDataset
 
 def get_optimizer(optimizer_name, model_params, lr):
     """

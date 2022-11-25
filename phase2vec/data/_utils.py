@@ -39,12 +39,6 @@ def curl(f, spacings=1):
 
     #[[dFxdz,dFxdy,dFxdx],[dFydz,dFydy,dFydx],[dFzdz,dFzdy,dFzdx]]
 
-    #dFxdy = J[:,0,1]
-    #dFxdz = J[:,0,0]
-    #dFydx = J[:,1,2]
-    #dFydz = J[:,1,0]
-    #dFzdx = J[:,2,2]
-    #dFzdy = J[:,2,1]
     dFxdy = J[:,0,1]
     dFxdz = J[:,0,2]
     dFydx = J[:,1,0]
@@ -59,7 +53,6 @@ def divergence(f,spacings=1):
 
     # J.shape = batch x dim x dim x [spatial]^n
     J = jacobian(f,spacings=spacings)
-    #return torch.diagonal(J,dim1=1,dim2=2).sum(-1)
     return J[:,0,0] + J[:,1,1]
 
 def laplacian(f):

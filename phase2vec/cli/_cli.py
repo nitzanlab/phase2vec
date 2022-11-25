@@ -6,13 +6,13 @@ import time
 import numpy as np
 from functools import partial
 
-from src.train import train_model, run_epoch, load_model
+from phase2vec.train import train_model, run_epoch, load_model
 
-from src.gridsearch import generate_gridsearch_worker_params, get_gridsearch_default_scans, results_to_df
-from src.gridsearch import wrap_command_with_local, wrap_command_with_slurm, write_jobs
-from src.utils import command_with_config, ensure_dir, get_command_defaults
-from src.utils import update_yaml, write_yaml, read_yaml, timestamp, strtuple_to_list, str_to_list, get_last_config
-from src.data import SystemFamily, sindy_library, load_dataset
+from phase2vec.gridsearch import generate_gridsearch_worker_params, get_gridsearch_default_scans, results_to_df
+from phase2vec.gridsearch import wrap_command_with_local, wrap_command_with_slurm, write_jobs
+from phase2vec.utils import command_with_config, ensure_dir, get_command_defaults
+from phase2vec.utils import update_yaml, write_yaml, read_yaml, timestamp, strtuple_to_list, str_to_list, get_last_config
+from phase2vec.data import SystemFamily, sindy_library, load_dataset
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.metrics import classification_report

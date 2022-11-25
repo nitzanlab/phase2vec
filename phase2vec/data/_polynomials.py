@@ -1,11 +1,10 @@
-
 import torch
 import numpy as np
 from scipy.special import binom
 
 def library_size(dim, poly_order, include_sine=False, include_exp=False, include_constant=True):
     """
-    Calculate library size for a given polynomial order.
+    Calculate library size for a given polynomial order. Taken from `https://github.com/kpchamp/SindyAutoencoders`
 
     """
     l = 0
@@ -21,7 +20,7 @@ def library_size(dim, poly_order, include_sine=False, include_exp=False, include
 
 def sindy_library(X, poly_order, include_sine=False, include_exp=False):
     """
-    Generate a library of polynomials of order poly_order
+    Generate a library of polynomials of order poly_order. Taken from `https://github.com/kpchamp/SindyAutoencoders`
     """
     X = torch.Tensor(X) if isinstance(X, (np.ndarray, np.generic)) else X
     m,n = X.shape # samples x dim

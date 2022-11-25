@@ -40,5 +40,5 @@ setup(
         'yarl>=1.8.1',
         'zipp>=3.9.0'
     ],
-    entry_points={'console_scripts': ['phase2vec = src.cli:cli']}
+    entry_points={'console_scripts': ['phase2vec = phase2vec.cli:cli']}
 )

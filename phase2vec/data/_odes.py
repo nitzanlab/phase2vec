@@ -1,24 +1,16 @@
-#import matplotlib
-#matplotlib.use('Agg')
 import pandas as pd
 import matplotlib.pyplot as plt
-#plt.ioff()
 from mpl_toolkits import mplot3d
 import math
 import torch
 import numpy as np
 from torchdiffeq import odeint, odeint_adjoint
-from functorch import vmap, jacrev
 import torch.nn.functional as F
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from src.data._polynomials import sindy_library, library_size
-# from IPython.display import display, Math, Latex
-#from flow_encoding.utils import stable_sigmoid
-#matplotlib.rcParams['text.usetex'] = True
-import pdb
+from phase2vec.data._polynomials import sindy_library, library_size
 from time import time
 from sklearn import linear_model
-from src.data._utils import curl
+from phase2vec.data._utils import curl
 
 
 class FlowSystemODE(torch.nn.Module):
@@ -157,8 +149,6 @@ class FlowSystemODE(torch.nn.Module):
         min_dims, max_dims, _ = self.get_lattice_params(min_dims, max_dims)
 
         lx, ly, lz = L.shape[:3] # TODO: which dims
-        # ax_n = ax is None
-        # if ax is None:
         fig = plt.figure()
         ax = plt.axes(projection='3d')
         for x in range(lx):
@@ -178,16 +168,12 @@ class FlowSystemODE(torch.nn.Module):
         ax.set_zlabel(self.labels[2])
         ax.set_title(title)
         plt.show()
-        # if ax_n:
-        #     plt.show()
-        #     plt.close()
 
     def generate_mesh(self, min_dims=None, max_dims=None, num_lattice=None):
         """
         Creates a lattice over coordinate range
         """
         spatial_coords = [torch.linspace(mn, mx, num_lattice) for (mn, mx) in zip(min_dims, max_dims)]
-        # TODO: This is used because pytorch 1.9.0 does not have an indexing keyword argument which can we used to switch to xy ordering for the mesh. We should update to pytorch 1.10.0. 
         mesh = torch.meshgrid(*spatial_coords,indexing='ij')
         return torch.cat([ms[..., None] for ms in mesh], axis=-1)
 
@@ -202,7 +188,6 @@ class FlowSystemODE(torch.nn.Module):
 
         if self.dim == 2:
             self._plot_trajectory_2d(L=L, ax=ax, which_dims=which_dims, title=title)
-            # self._plot_trajectory_2d(T, alpha, mesh, L, ax=ax, which_dims=which_dims, title=title)
         elif self.dim == 3:
             self._plot_trajectory_3d(T, alpha, mesh, L, min_dims, max_dims, ax=ax, which_dims=which_dims, title=title)
 
@@ -328,12 +313,7 @@ class SaddleNode(FlowSystemODE):
         xdot = self.params[0] - x**2 
         ydot = -y 
         zdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1)], dim=-1)
-        return zdot#.float()
-        #if self.bounded:
-            #return (zdot * torch.sigmoid(self.boundary_gain*(self.bound - torch.norm(z,2,dim=-1,keepdim=True)))).float()
-        #    return zdot#.float().float()
-        #else:
-        #    return zdot#.float().float()
+        return zdot
 
     def get_polynomial_representation(self):
         dx = pd.DataFrame(0.0, index=['saddle_node'], columns=self.polynomial_terms)
@@ -382,8 +362,6 @@ class Homoclinic(FlowSystemODE):
         ydot = mu * y + x - x^2 + xy
     """
 
-    #min_dims = [-2,-2]
-    #max_dims = [2,2]
     min_dims = [-1,-1]
     max_dims = [1,1]
     recommended_param_ranges=[[-1.2,-.5]]
@@ -400,15 +378,13 @@ class Homoclinic(FlowSystemODE):
         y = z[..., 1]
         a = self.params[0]
 
-        #xdot = y
-        #ydot = self.params[0]*y + x - x**2 + x*y
         v = 2 * x
         w = 2 * y
         xdot = w
         ydot = self.params[0]*w + v -v**2 + v*w
        
         zdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1)], dim=-1)
-        return zdot#.float()
+        return zdot
 
     def get_polynomial_representation(self):
         dx = pd.DataFrame(0.0, index=['homoclinic'], columns=self.polynomial_terms)
@@ -445,7 +421,7 @@ class Transcritical(FlowSystemODE):
         xdot = self.params[0]*x - x**2
         ydot = -y
         zdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1)], dim=-1)
-        return zdot#.float()
+        return zdot
 
     def get_polynomial_representation(self):
         dx = pd.DataFrame(0.0, index=['transcritical'], columns=self.polynomial_terms)
@@ -484,12 +460,11 @@ class SimpleOscillator(FlowSystemODE):
         r = torch.sqrt(x**2 + y**2)
         theta = torch.atan2(y,  x)
         rdot = r * (self.params[0] - r ** 2)
-        # thetadot = torch.tensor(-1.)
 
         xdot = torch.cos(theta) * rdot - r * torch.sin(theta)
         ydot = torch.sin(theta) * rdot + r * torch.cos(theta)
         zdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1)], dim=-1)
-        return zdot#.float()
+        return zdot
 
 class SelkovOscillator(FlowSystemODE):
     """
@@ -498,8 +473,6 @@ class SelkovOscillator(FlowSystemODE):
         ydot = b - ay - x^2y
 
     """
-    #min_dims = [0,0]
-    #max_dims = [3.,3.]
     min_dims = [-1.,-1.]
     max_dims = [1.,1.]
 
@@ -521,7 +494,7 @@ class SelkovOscillator(FlowSystemODE):
         xdot = -v + a*w + v**2*w
         ydot = b - a*w - v**2*w
         zdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1)], dim=-1)
-        return zdot#.float()
+        return zdot
 
     def get_polynomial_representation(self):
         dx = pd.DataFrame(0.0, index=['selkov'], columns=self.polynomial_terms)
@@ -544,8 +517,6 @@ class SelkovOscillator(FlowSystemODE):
 
 class VanDerPolOscillator(FlowSystemODE):
 
-    #min_dims = [-6.5, -6.5]
-    #max_dims = [6.5, 6.5]
     min_dims = [-1., -1.]
     max_dims = [1., 1.]
 
@@ -560,15 +531,13 @@ class VanDerPolOscillator(FlowSystemODE):
         y = z[...,1]
 
         mu = self.params[0]
-        #xdot = y
-        #ydot = mu * (1-x**2) * y - x
         v = 6.5*x
         w = 6.5*y
         xdot = w
         ydot = mu * (1-v**2) * w - v
         
         zdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1)], dim=-1)
-        return zdot#.float()
+        return zdot
 
     def get_polynomial_representation(self):
         dx = pd.DataFrame(0.0, index=['vanderpol'], columns=self.polynomial_terms)
@@ -600,8 +569,6 @@ class AlonSystem(FlowSystemODE):
     n_params = 6
     params = torch.ones(n_params)
 
-#    min_dims = [0.0, 0.0]
-#    max_dims = [20.0, 10.0]
     min_dims = [-1.,-1.]
     max_dims = [1.,1.]
 
@@ -646,7 +613,7 @@ class AlonSystem(FlowSystemODE):
                self.params[4] * self.alpha0 * self.uptake(c) * X - \
                self.params[5] * self.gamma * c
         zdot = torch.cat([Xdot.unsqueeze(-1), cdot.unsqueeze(-1)], dim=-1)
-        return zdot#.float()
+        return zdot
 
 class LotkaVolterra(FlowSystemODE):
     labels = ['rabbit', 'lynx']
@@ -694,9 +661,7 @@ class FitzHughNagumo(FlowSystemODE):
 
     labels = ['v', 'w'] # TODO: can the voltage be negative???
     n_params = 4
-    params = torch.zeros(n_params) #tensor([0, 0, 0, 0])
-    #min_dims = [-3.0, -3.0]
-    #max_dims = [3.0, 3.0]
+    params = torch.zeros(n_params)
     min_dims = [-1.,-1.]
     max_dims = [1.,1.]
 
@@ -724,7 +689,7 @@ class FitzHughNagumo(FlowSystemODE):
         vdot = x - x**3 / 3. - y + I
         wdot = (1. / tau) * (x + a - b*y)
         zdot = torch.cat([vdot.unsqueeze(-1), wdot.unsqueeze(-1)], dim=-1)
-        return zdot#.float()
+        return zdot
 
     def get_polynomial_representation(self):
         """
@@ -742,7 +707,7 @@ class FitzHughNagumo(FlowSystemODE):
         dy.loc['fitzhughnagumo']['$x_1$'] = (1/params[1]) * (-3*params[2])
         return dx, dy
 
-class HodgkinHuxley(FlowSystemODE): # TODO: not working
+class HodgkinHuxley(FlowSystemODE):
     """
     Hodgkin Huxley modelling initiation and propagation of action potential across neurons:
 
@@ -771,9 +736,6 @@ class HodgkinHuxley(FlowSystemODE): # TODO: not working
 
     def __init__(self, params=params, labels=labels, num_lattice=num_lattice, min_dims=min_dims, max_dims=max_dims, **kwargs):
         super().__init__(params, labels, num_lattice=num_lattice, min_dims=min_dims, max_dims=max_dims, **kwargs)
-
-    # def rate_constant(self, v, a, b, c, d, e):
-    #     return (a*v + b) / (torch.exp((d - v) / e) + c)
 
     def alpha_m_rate(self, V):
         return 0.1 * (V + 40.0) / (1.0 - torch.exp(-(V + 40.0) / 10.0))
@@ -865,10 +827,6 @@ class Lorenz(FlowSystemODE):
     def __init__(self, params=params, labels=labels, min_dims=min_dims, max_dims=max_dims, **kwargs):
         super().__init__(params, labels, min_dims=min_dims, max_dims=max_dims, **kwargs)
 
-    # TODO: check where x_min=-10.0 was integrated here
-    # def plot_trajectory(self, T, min_dims=min_dims, max_dims=max_dims, **kwargs):
-    #     super().plot_trajectory(T, min_dims=min_dims, max_dims=max_dims, **kwargs)
-
     def forward(self, t, q, **kwargs):
         x = q[..., 0]
         y = q[..., 1]
@@ -931,7 +889,7 @@ class Conservative(FlowSystemODE):
 
         phi = torch.einsum('sl,l->s', self.library, self.params).reshape(self.num_lattice, self.num_lattice) # generate scalar field
         zdot = torch.stack([dphi for dphi in torch.gradient(phi,dim=[0,1])]).permute(1,2,0)
-        return zdot#.float()
+        return zdot
 
 class Incompressible(FlowSystemODE):
     '''Divergence-free vector fields. Generated by taking the imaginary component of the derivate (in the complex sense) of a random holomorphic function.'''
@@ -986,7 +944,6 @@ class Polynomial(FlowSystemODE):
     recommended_param_ranges = 20*[[-3., 3.]]
     recommended_param_groups = [recommended_param_ranges]
  
-    # TODO: handle defaults?
     def __init__(self, params=None, labels=['x', 'y'], min_dims=[-1.0,-1.0], max_dims=[1.0,1.0], poly_order=3, include_sine=False, include_exp=False, **kwargs):
         """
         Initialize the polynomial system.
@@ -1012,10 +969,7 @@ class Polynomial(FlowSystemODE):
         zdot = torch.einsum('sl,ld->sd', library.to(params.device).float(), params.float())
         zdot = zdot.reshape(*z_shape)
     
-        # xdot = data[:, 0]
-        # ydot = data[:, 1]
-        # zdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1)], dim=-1)
-        return zdot#.float()
+        return zdot
 
     def params_str(self, s=''):
         """
@@ -1023,7 +977,6 @@ class Polynomial(FlowSystemODE):
         """
         nterms = len(self.library_terms)
         if (nterms * self.dim)!= len(self.params):
-        # raise ValueError('Number of parameters does not match number of library terms.')
             return s
         eqs = []
         params = self.params.numpy()
@@ -1056,8 +1009,6 @@ class Polynomial(FlowSystemODE):
 class NeuralODE(FlowSystemODE):
     params = {}
     labels = ['u','v']
-    #min_dims = [-10.,-10.]
-    #max_dims = [10.,10.]
 
     def __init__(self, params=params, labels=labels, min_dims=[-2.,-2.], max_dims=[2.,2.], squeeze=True, train=False, **kwargs):
         super().__init__(params, labels, min_dims=min_dims, max_dims=max_dims, **kwargs)
@@ -1081,26 +1032,17 @@ class NeuralODE(FlowSystemODE):
 
 if __name__ == '__main__':
     
-    # fig, ax = plt.subplots(1)
     dim = 2
     poly_order = 3
     params = np.random.uniform(low=-2, high=2, size=dim * library_size(dim, poly_order))
-    # kwargs = {'device': 'cpu', 'poly_order': poly_order, 'params': params} # 'min_dims': [-2, -2], 'max_dims': [2, 2],
-    # DE = Polynomial(**kwargs)
 
     params = [2]
-    kwargs = {'device': 'cpu', 'params': params} # 'min_dims': [-2, -2], 'max_dims': [2, 2],
+    kwargs = {'device': 'cpu', 'params': params} 
     DE = SaddleNode(**kwargs)
     
     dx,dy = DE.get_polynomial_representation()
     print(dx)
     print(dy)
     fig, ax = plt.subplots(1,1, figsize=(10,10))
-    DE.plot_vector_field(ax=ax)#
-    # # DE.run(T=50, alpha=0.1)
-    # # DE.plot_trajectory(T=50, alpha=0.1)
-
-    # # DE = FitzhughNagumo(**kwargs)
-    # # DE.plot_trajectory(T=50, alpha=0.1, ax=ax[1])
-    # plt.savefig('polynomial_vector_field.png')
+    DE.plot_vector_field(ax=ax)
     plt.show()

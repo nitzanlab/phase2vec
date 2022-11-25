@@ -1,16 +1,10 @@
-import os
 import torch
-import random
-import datetime
 import numpy as np
-from typing import List
-import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
-
-from src.train._layers import *
-from src.train._losses import *
-from src.train._models import *
-from src.train._utils import *
+from phase2vec.train._layers import *
+from phase2vec.train._losses import *
+from phase2vec.train._models import *
+from phase2vec.train._utils import *
 
 def train_model(X_train, X_test,
                 y_train, y_test,
