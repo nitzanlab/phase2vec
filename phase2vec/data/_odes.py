@@ -170,20 +170,20 @@ class FlowSystemODE(torch.nn.Module):
         ax.set_title(title)
         plt.show()
 
-    def generate_mesh(self, min_dims=None, max_dims=None, num_lattice=None):
+    def generate_mesh(self, min_dims=None, max_dims=None, num_lattice=None, indexing='ij'):
         """
         Creates a lattice over coordinate range
         """
         min_dims, max_dims, num_lattice = self.get_lattice_params(min_dims, max_dims, num_lattice)
         spatial_coords = [torch.linspace(mn, mx, num_lattice) for (mn, mx) in zip(min_dims, max_dims)]
-        mesh = torch.meshgrid(*spatial_coords,indexing='ij')
+        mesh = torch.meshgrid(*spatial_coords, indexing=indexing)
         return torch.cat([ms[..., None] for ms in mesh], axis=-1)
 
     def plot_trajectory(self, T=None, alpha=None, min_dims=None, max_dims=None, num_lattice=None, ax=None, which_dims=[0,1], title=''):
         """
         Plot multiple trajectories
         """
-        L = self.generate_mesh(min_dims=self.min_dims, max_dims=self.max_dims, num_lattice=self.num_lattice)
+        L = self.generate_mesh(min_dims=self.min_dims, max_dims=self.max_dims, num_lattice=self.num_lattice, indexing='xy')
         L = L.to(self.device)
 
         mesh = (L[...,0], L[...,1])
