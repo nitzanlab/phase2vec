@@ -104,13 +104,14 @@ class FlowSystemODE(torch.nn.Module):
         return min_dims, max_dims, num_lattice
 
 
-    def _plot_trajectory_2d(self, L, fig=None, ax=None, density=1.0, which_dims=[0,1], title=''):
+    def _plot_trajectory_2d(self, L, fig=None, ax=None, density=1.0, which_dims=[0,1], 
+                            min_dims=None, max_dims=None, num_lattice=None, title=''):
         """
         Plots trajectory over a 2d grid
         """
         # TODO: add handling of different dims
 
-        #min_dims, max_dims, _ = self.get_lattice_params(min_dims, max_dims)
+        min_dims, max_dims, num_lattice = self.get_lattice_params(min_dims, max_dims, num_lattice)
         xdim, ydim = which_dims
         if ax is None:
             fig, ax = plt.subplots(figsize=(6, 6))
@@ -118,10 +119,10 @@ class FlowSystemODE(torch.nn.Module):
             UV = self.forward(0, L.clone().reshape(1,-1,self.dim))[0].reshape(L.shape).detach()
         else:
             UV = self.forward(0, L.clone())
-        X = L[...,0].cpu().numpy()
-        Y = L[...,1].cpu().numpy()
-        U = UV[...,0].cpu().numpy()
-        V = UV[...,1].cpu().numpy()
+        X = np.linspace(min_dims[xdim], max_dims[xdim], num_lattice) #L[...,0].cpu().numpy()
+        Y = np.linspace(min_dims[ydim], max_dims[ydim], num_lattice) #L[...,1].cpu().numpy()
+        U = UV[...,xdim].cpu().numpy()
+        V = UV[...,ydim].cpu().numpy()
         R = np.sqrt(U**2 + V**2)
 
         stream = ax.streamplot(X,Y,U,V,density=density,color=R,cmap='autumn',integration_direction='forward')
@@ -173,6 +174,7 @@ class FlowSystemODE(torch.nn.Module):
         """
         Creates a lattice over coordinate range
         """
+        min_dims, max_dims, num_lattice = self.get_lattice_params(min_dims, max_dims, num_lattice)
         spatial_coords = [torch.linspace(mn, mx, num_lattice) for (mn, mx) in zip(min_dims, max_dims)]
         mesh = torch.meshgrid(*spatial_coords,indexing='ij')
         return torch.cat([ms[..., None] for ms in mesh], axis=-1)
@@ -187,7 +189,7 @@ class FlowSystemODE(torch.nn.Module):
         mesh = (L[...,0], L[...,1])
 
         if self.dim == 2:
-            self._plot_trajectory_2d(L=L, ax=ax, which_dims=which_dims, title=title)
+            self._plot_trajectory_2d(L=L, ax=ax, which_dims=which_dims, min_dims=min_dims, max_dims=max_dims, num_lattice=num_lattice, title=title)
         elif self.dim == 3:
             self._plot_trajectory_3d(T, alpha, mesh, L, min_dims, max_dims, ax=ax, which_dims=which_dims, title=title)
 
@@ -210,11 +212,19 @@ class FlowSystemODE(torch.nn.Module):
         if ax is None:
             fig, ax = plt.subplots(1)
         L = self.generate_mesh(min_dims=min_dims, max_dims=max_dims, num_lattice=num_lattice).to(self.device)
-        flow = self.forward(0, torch.tensor(L).detach().float()).detach().numpy()
+        flow_dims = [self.num_lattice] * self.dim + [self.dim]
+        flow = self.forward(0, torch.tensor(L).detach().float()).detach().numpy().reshape(flow_dims)
         xdim, ydim = which_dims
 
-        coords = [np.squeeze(L[..., a]) for a in range(self.dim)]
-        img = [np.squeeze(flow[..., a]) for a in range(self.dim)]
+        coords = [np.squeeze(L[..., a]) for a in which_dims]
+        img = [np.squeeze(flow[..., a]) for a in which_dims]
+
+        # slice: if higher than 2d, take the middle slice over dims not in which_dims
+        for i in reversed(range(self.dim)):
+            if i not in which_dims:
+                img = [np.take(im, im.shape[i] // 2, axis=i) for im in img]
+                coords = [np.take(c, c.shape[i] // 2, axis=i) for c in coords]
+
         ax.quiver(*coords, *img)
 
         ax.set_xlabel(self.labels[xdim])
@@ -247,37 +257,41 @@ class FlowSystemODE(torch.nn.Module):
         :param fit_with: method to fit the polynomial, options are 'lstsq' or 'lasso'
         :param kwargs: additional arguments to pass to the fitting method
         """
-        if self.dim != 2:
-            raise ValueError('Polynomial representation only implemented for 2D systems')
+        # if self.dim != 2:
+        #     raise ValueError('Polynomial representation only implemented for 2D systems')
         poly_order = poly_order if poly_order else self.poly_order
         # defaults to least square fitting
         L = self.generate_mesh(num_lattice=self.num_lattice, min_dims=self.min_dims, max_dims=self.max_dims)
-        z = self.forward(0, torch.tensor(L).float().reshape(-1, self.dim)).reshape(self.num_lattice, self.num_lattice, self.dim)
-        zx = z[:,:,0].numpy().flatten()
-        zy = z[:,:,1].numpy().flatten()
+        z_dims = [self.num_lattice] * self.dim + [self.dim]
+        z = self.forward(0, torch.tensor(L).float().reshape(-1, self.dim)).reshape(z_dims)
 
         library, library_terms = sindy_library(L.reshape(self.num_lattice**self.dim, self.dim), poly_order=poly_order)
-        if fit_with == 'lstsq':
-            start = time()
-            mx = np.linalg.lstsq(library, zx, **kwargs)[0]
-            my = np.linalg.lstsq(library, zy, **kwargs)[0]
-            stop = time()
-        elif fit_with == 'lasso':
-            clf = linear_model.Lasso(**kwargs)
-            start = time()
-            clf.fit(library, zx)
-            mx = clf.coef_
-            clf.fit(library, zy)
-            my = clf.coef_
-            stop = time()
-        else:
-            raise ValueError('fit_with must be either "lstsq" or "lasso"')
-        dx = pd.DataFrame(data={lb:m.astype(np.float64) for lb,m in  zip(library_terms,mx)}, index=[self.__class__.__name__])
-        dy = pd.DataFrame(data={lb:m.astype(np.float64) for lb,m in  zip(library_terms,my)}, index=[self.__class__.__name__])
+
+        dx_list = []
+        total_time = 0
+        for d in range(self.dim):
+            zx = z[...,d].numpy().flatten()
+        
+            if fit_with == 'lstsq':
+                start = time()
+                mx = np.linalg.lstsq(library, zx, **kwargs)[0]
+                stop = time()
+            elif fit_with == 'lasso':
+                clf = linear_model.Lasso(**kwargs)
+                start = time()
+                clf.fit(library, zx)
+                mx = clf.coef_
+                stop = time()
+            else:
+                raise ValueError('fit_with must be either "lstsq" or "lasso"')
+            dx = pd.DataFrame(data={lb:m.astype(np.float64) for lb,m in  zip(library_terms,mx)}, index=[self.__class__.__name__])
+            total_time += stop - start
+            dx_list.append(dx)
+
         if return_rt:
-            return dx, dy, stop - start
+            return *dx_list, total_time
         else:
-            return dx, dy
+            return dx_list
 
 
     def get_polynomial_representation(self):
@@ -823,8 +837,14 @@ class Lorenz(FlowSystemODE):
     max_dims = [20.0, 20.0, 40.0]
 
     recommended_param_ranges = [[0, 1]] * n_params
+    eq_string = r'$\sigma=%.02f; \rho=%.02f; \beta=%.02f;$'
+    short_name = 'lz'
+
 
     def __init__(self, params=params, labels=labels, min_dims=min_dims, max_dims=max_dims, **kwargs):
+        """
+        :param params: parameters of the system - [sigma, rho, beta]
+        """
         super().__init__(params, labels, min_dims=min_dims, max_dims=max_dims, **kwargs)
 
     def forward(self, t, q, **kwargs):
@@ -840,11 +860,30 @@ class Lorenz(FlowSystemODE):
         ydot = x * (rho - z) - y
         zdot = x * y - beta * z
 
-        qdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1), zdot.unsqueeze(-1)],dim=-1)
-        if self.bounded:
-            return (qdot * torch.sigmoid(self.boundary_gain*(self.bound - torch.norm(q,1,dim=-1,keepdim=True)))).float()
-        else:
-            return qdot.float()
+        qdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1), zdot.unsqueeze(-1)], dim=-1)
+        # if self.bounded:
+        #     return (qdot * torch.sigmoid(self.boundary_gain*(self.bound - torch.norm(q, 1, dim=-1, keepdim=True)))).float()
+        # else:
+        #     return qdot.float()
+        return qdot.float()
+
+    def get_polynomial_representation(self):
+        dx = pd.DataFrame(0.0, index=['lorenz'], columns=self.polynomial_terms)
+        dy = pd.DataFrame(0.0, index=['lorenz'], columns=self.polynomial_terms)
+        dz = pd.DataFrame(0.0, index=['lorenz'], columns=self.polynomial_terms)
+        params = [p.numpy() for p in self.params]
+        
+        dx.loc['lorenz']['$x_0$'] = -params[0]
+        dx.loc['lorenz']['$x_1$'] = params[0]
+        
+        dy.loc['lorenz']['$x_0$'] = params[1]
+        dy.loc['lorenz']['$x_1$'] = -1
+        dy.loc['lorenz']['$x_0x_2$'] = -1
+        
+        dz.loc['lorenz']['$x_0x_1$'] = 1
+        dz.loc['lorenz']['$x_2$'] = -params[2]
+        return dx, dy, dz
+        
 
 class Linear(FlowSystemODE):
 
@@ -1043,6 +1082,31 @@ if __name__ == '__main__':
     dx,dy = DE.get_polynomial_representation()
     print(dx)
     print(dy)
-    fig, ax = plt.subplots(1,1, figsize=(10,10))
-    DE.plot_vector_field(ax=ax)
+    
+    which_dims = [0,1]
+    fig, ax = plt.subplots(1,2, figsize=(10,10))
+    DE.plot_vector_field(ax=ax[0], which_dims=which_dims)
+    DE.plot_trajectory(ax=ax[1])
     plt.show()
+
+    # params = [10,28,8/3]
+    # min_dims = [-30,-20,0]
+    # max_dims = [30,20,60]
+    # kwargs = {'device': 'cpu', 'params': params, 'min_dims': min_dims, 'max_dims': max_dims}
+    # DE = Lorenz(**kwargs)
+
+    # poly_order = 2
+    # dx,dy,dz = DE.get_polynomial_representation()
+    # # print(dx)
+    # # print(dy)
+    # # print(dz)
+
+    # dx,dy,dz = DE.fit_polynomial_representation(poly_order=poly_order)
+    # # print(dx)
+    # # print(dy)
+    # # print(dz)
+
+    # fig, ax = plt.subplots(1,2, figsize=(10,10))
+    # DE.plot_vector_field(ax=ax[0], which_dims=[0,2])
+    # DE.plot_trajectory(ax=ax[1], which_dims=[0,2])
+    # plt.show()
