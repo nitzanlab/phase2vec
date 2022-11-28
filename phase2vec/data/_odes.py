@@ -74,7 +74,7 @@ class FlowSystemODE(torch.nn.Module):
         self.polynomial_terms = sindy_library(torch.ones((1, self.dim)), poly_order=3, include_sine=False, include_exp=False)[1]
 
 
-    def run(self, T, alpha, init=None,clip=True):
+    def run(self, T, alpha, init=None, clip=True):
         """
         Run system
 
@@ -84,7 +84,6 @@ class FlowSystemODE(torch.nn.Module):
 
         returns:
         """
-
         init = torch.zeros(self.dim) if init is None else init
         T = T * self.time_direction
         grid = torch.linspace(0, T, abs(int(T / alpha)))
@@ -108,7 +107,7 @@ class FlowSystemODE(torch.nn.Module):
         """
         Returns a vector field of the system
         """
-        L = self.generate_mesh(min_dims=min_dims, max_dims=max_dims, num_lattice=num_lattice).to(self.device)
+        L = self.generate_mesh(min_dims=min_dims, max_dims=max_dims, num_lattice=num_lattice, indexing='xy').to(self.device)
         flow_dims = [self.num_lattice] * self.dim + [self.dim]
         flow = self.forward(0, torch.tensor(L).detach().float()).detach().numpy().reshape(flow_dims)
 
@@ -225,10 +224,11 @@ class FlowSystemODE(torch.nn.Module):
         #     self._plot_trajectory_3d(T, alpha, mesh, L, min_dims, max_dims, ax=ax, which_dims=which_dims, title=title)
         xdim, ydim = which_dims
         coords, img, slice_str = self.get_vector_field(which_dims=which_dims, min_dims=min_dims, max_dims=max_dims, num_lattice=num_lattice, slice=slice)
-        Y = coords[0].numpy()
-        X = coords[1].numpy()
+        X = coords[0].numpy()
+        Y = coords[1].numpy()
         # X,Y = coords
-        V,U = img
+        # V,U = [v.T for v in img]
+        U,V = img
         R = np.sqrt(U**2 + V**2)
 
         stream = ax.streamplot(X,Y,U,V,density=density,color=R,cmap='autumn',integration_direction='forward')
@@ -1124,15 +1124,18 @@ if __name__ == '__main__':
 
     # saddlenode example
     params = [2]
-    kwargs = {'device': 'cpu', 'params': params} 
+    min_dims = [-2.,-2.]
+    max_dims = [2.,2.]
+    num_lattice = 5
+    kwargs = {'device': 'cpu', 'params': params, 'min_dims': min_dims, 'max_dims': max_dims, 'num_lattice': num_lattice}
     DE = SaddleNode(**kwargs)
     
-    # dx,dy = DE.get_polynomial_representation()
-    # print(dx)
-    # print(dy)
+    dx,dy = DE.fit_polynomial_representation(fit_with='lasso', poly_order=2)
+    print(dx)
+    print(dy)
     
     which_dims = [0,1]
-    fig, ax = plt.subplots(1,2, figsize=(10,10))
+    fig, ax = plt.subplots(1, 2, figsize=(10,10))
     DE.plot_vector_field(ax=ax[0], which_dims=which_dims)
     DE.plot_trajectory(ax=ax[1], which_dims=which_dims)
     plt.show()
