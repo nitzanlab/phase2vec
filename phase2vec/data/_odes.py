@@ -1032,17 +1032,24 @@ class NeuralODE(FlowSystemODE):
 
 if __name__ == '__main__':
     
-    dim = 2
-    poly_order = 3
-    params = np.random.uniform(low=-2, high=2, size=dim * library_size(dim, poly_order))
+    # dim = 2
+    # poly_order = 3
+    # params = np.random.uniform(low=-2, high=2, size=dim * library_size(dim, poly_order))
 
     params = [2]
-    kwargs = {'device': 'cpu', 'params': params} 
+    min_dims = [-2,-2]
+    max_dims = [2,2]
+    num_lattice = 5
+    kwargs = {'device': 'cpu', 'params': params, 'min_dims': min_dims, 'max_dims': max_dims, 'num_lattice': num_lattice} 
     DE = SaddleNode(**kwargs)
     
     dx,dy = DE.get_polynomial_representation()
     print(dx)
     print(dy)
-    fig, ax = plt.subplots(1,1, figsize=(10,10))
-    DE.plot_vector_field(ax=ax)
-    plt.show()
+    dx,dy = DE.fit_polynomial_representation(poly_order=2)
+    print(dx)
+    print(dy)
+    
+    # fig, ax = plt.subplots(1,1, figsize=(10,10))
+    # DE.plot_vector_field(ax=ax)
+    # plt.show()
