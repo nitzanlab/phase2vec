@@ -53,6 +53,7 @@ class FlowSystemODE(torch.nn.Module):
         num_lattice - resolution of lattice of initial conditions
         min_dims - dimension's minimums of lattice of initial conditions
         max_dims - dimension's maximums of lattice of initial conditions
+        boundary_type - type of boundary condition (default: None)
         """
         super().__init__()
         self.solver = odeint_adjoint if adjoint else odeint
@@ -134,72 +135,6 @@ class FlowSystemODE(torch.nn.Module):
 
         return coords, img, slice_str
 
-    def _plot_trajectory_2d(self, L, fig=None, ax=None, density=1.0, which_dims=[0,1], 
-                            min_dims=None, max_dims=None, num_lattice=None, title=''):
-        """
-        Plots trajectory over a 2d grid
-        """
-        # TODO: add handling of different dims
-
-        min_dims, max_dims, num_lattice = self.get_lattice_params(min_dims, max_dims, num_lattice)
-        xdim, ydim = which_dims
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(6, 6))
-        if isinstance(self, NeuralODE):
-            UV = self.forward(0, L.clone().reshape(1,-1,self.dim))[0].reshape(L.shape).detach()
-        else:
-            UV = self.forward(0, L.clone())
-        X = np.linspace(min_dims[xdim], max_dims[xdim], num_lattice) #L[...,0].cpu().numpy()
-        Y = np.linspace(min_dims[ydim], max_dims[ydim], num_lattice) #L[...,1].cpu().numpy()
-        U = UV[...,xdim].cpu().numpy()
-        V = UV[...,ydim].cpu().numpy()
-        R = np.sqrt(U**2 + V**2)
-
-        stream = ax.streamplot(X,Y,U,V,density=density,color=R,cmap='autumn',integration_direction='forward')
-        divider = make_axes_locatable(ax)
-        cax = divider.append_axes("right", size="5%", pad=0.1)
-        cax.set_xticks([])
-        cax.set_xticklabels([])
-        cax.set_yticks([])
-        cax.set_yticklabels([])
-        
-        if fig:
-            fig.colorbar(stream.lines, ax=cax)
-        
-        ax.set_xlim([self.min_dims[xdim], self.max_dims[xdim]]) # TODO: replace with min of L
-        ax.set_ylim([self.min_dims[ydim], self.max_dims[ydim]])
-        ax.set_xlabel(self.labels[xdim])
-        ax.set_ylabel(self.labels[ydim])
-        ax.set_title(title,fontsize=8)
-
-
-    # def _plot_trajectory_3d(self, T, alpha, L, min_dims=None, max_dims=None, ax=None, which_dims=[0,1,2], title=''):
-    #     """
-    #     Plots trajectory over a 3d grid
-    #     """
-    #     min_dims, max_dims, _ = self.get_lattice_params(min_dims, max_dims)
-
-    #     lx, ly, lz = L.shape[:3] # TODO: which dims
-    #     fig = plt.figure()
-    #     ax = plt.axes(projection='3d')
-    #     for x in range(lx):
-    #         for y in range(ly):
-    #             for z in range(lz):
-    #                 ic = L[x, y, z]
-    #                 trajectory = self.run(T, alpha=alpha, init=ic).detach().cpu().numpy()
-    #                 p = ax.plot(trajectory[..., 0], trajectory[..., 1], trajectory[..., 2], linewidth=1, alpha=.5,
-    #                             color='blue')
-    #                 ax.scatter(trajectory[-1, 0], trajectory[-1, 1],  trajectory[-1, 2], c='red', marker='x', s=64)
-
-    #     ax.set_xlim([min_dims[0], max_dims[0]])
-    #     ax.set_ylim([min_dims[1], max_dims[1]])
-    #     ax.set_zlim([min_dims[2], max_dims[2]])
-    #     ax.set_xlabel(self.labels[0])
-    #     ax.set_ylabel(self.labels[1])
-    #     ax.set_zlabel(self.labels[2])
-    #     ax.set_title(title)
-    #     plt.show()
-
     def generate_mesh(self, min_dims=None, max_dims=None, num_lattice=None, indexing='ij'):
         """
         Creates a lattice over coordinate range
@@ -209,25 +144,14 @@ class FlowSystemODE(torch.nn.Module):
         mesh = torch.meshgrid(*spatial_coords, indexing=indexing)
         return torch.cat([ms[..., None] for ms in mesh], axis=-1)
 
-    def plot_trajectory(self, min_dims=None, max_dims=None, num_lattice=None, ax=None, which_dims=[0,1], slice=None, density=1.0, title=''):
+    def plot_trajectory(self, ax=None, which_dims=[0,1], slice=None, density=1.0, title=''):
         """
         Plot multiple trajectories
         """
-        # L = self.generate_mesh(min_dims=self.min_dims, max_dims=self.max_dims, num_lattice=self.num_lattice, indexing='xy')
-        # L = L.to(self.device)
-
-        # mesh = (L[...,0], L[...,1])
-
-        # if self.dim == 2:
-        #     self._plot_trajectory_2d(L=L, ax=ax, which_dims=which_dims, min_dims=min_dims, max_dims=max_dims, num_lattice=num_lattice, title=title)
-        # elif self.dim == 3:
-        #     self._plot_trajectory_3d(T, alpha, mesh, L, min_dims, max_dims, ax=ax, which_dims=which_dims, title=title)
         xdim, ydim = which_dims
         coords, img, slice_str = self.get_vector_field(which_dims=which_dims, min_dims=min_dims, max_dims=max_dims, num_lattice=num_lattice, slice=slice)
-        X = coords[0].numpy()
-        Y = coords[1].numpy()
-        # X,Y = coords
-        # V,U = [v.T for v in img]
+        X = coords[xdim].numpy()
+        Y = coords[ydim].numpy()
         U,V = img
         R = np.sqrt(U**2 + V**2)
 
@@ -239,14 +163,45 @@ class FlowSystemODE(torch.nn.Module):
         cax.set_yticks([])
         cax.set_yticklabels([])
         
-        if fig:
-            fig.colorbar(stream.lines, ax=cax)
-        
-        ax.set_xlim([self.min_dims[xdim], self.max_dims[xdim]]) # TODO: replace with min of L
-        ax.set_ylim([self.min_dims[ydim], self.max_dims[ydim]])
+        # if fig:
+        #     fig.colorbar(stream.lines, ax=cax)
+
+        ax.set_xlim([X.min(), X.max()])
+        ax.set_ylim([Y.min(), Y.max()])
         ax.set_xlabel(self.labels[xdim])
         ax.set_ylabel(self.labels[ydim])
         ax.set_title(title,fontsize=8)
+
+    def plot_trajectory_3d(self, T, alpha, min_dims=None, max_dims=None, ax=None, which_dims=[0,1,2], n_traj=10, title=''):
+            """
+            Plots trajectory over a 3d grid
+            """
+            L = self.generate_mesh(min_dims=min_dims, max_dims=max_dims, indexing='xy').to(self.device)
+            min_dims = L[..., which_dims].min(dim=0)[0]
+            max_dims = L.max(dim=0)[0].detach().numpy()
+            xdim, ydim, zdim = which_dims
+            # lx, ly, lz = L.shape[which_dims] 
+            inits = torch.rand(n_traj, self.dim).to(self.device)
+            fig = plt.figure()
+            ax = plt.axes(projection='3d')
+            # for x in range(lx):
+            #     for y in range(ly):
+            #         for z in range(lz):
+            #             ic = L[x, y, z]
+            for init in inits:
+                trajectory = self.run(T, alpha=alpha, init=init).detach().cpu().numpy()
+                p = ax.plot(trajectory[..., xdim], trajectory[..., ydim], trajectory[..., zdim], linewidth=1, alpha=.5,
+                            color='blue')
+                ax.scatter(trajectory[-1, xdim], trajectory[-1, ydim],  trajectory[-1, zdim], c='red', marker='x', s=64)
+
+            ax.set_xlim([min_dims[xdim], max_dims[xdim]])
+            ax.set_ylim([min_dims[ydim], max_dims[ydim]])
+            ax.set_zlim([min_dims[zdim], max_dims[zdim]])
+            ax.set_xlabel(self.labels[xdim])
+            ax.set_ylabel(self.labels[ydim])
+            ax.set_zlabel(self.labels[zdim])
+            ax.set_title(title)
+            plt.show()
 
 
     def params_str(self, s=''):
@@ -308,7 +263,7 @@ class FlowSystemODE(torch.nn.Module):
         #     raise ValueError('Polynomial representation only implemented for 2D systems')
         poly_order = poly_order if poly_order else self.poly_order
         # defaults to least square fitting
-        L = self.generate_mesh(num_lattice=self.num_lattice, min_dims=self.min_dims, max_dims=self.max_dims)
+        L = self.generate_mesh()
         z_dims = [self.num_lattice] * self.dim + [self.dim]
         z = self.forward(0, torch.tensor(L).float().reshape(-1, self.dim)).reshape(z_dims)
 
@@ -965,7 +920,7 @@ class Conservative(FlowSystemODE):
         super().__init__(params, labels, min_dims=min_dims, max_dims=max_dims, **kwargs)
 
         self.poly_order = int(poly_order)
-        L = self.generate_mesh(min_dims=self.min_dims, max_dims=self.max_dims, num_lattice=self.num_lattice)
+        L = self.generate_mesh()
         self.library, self.library_terms = sindy_library(L.reshape(self.num_lattice**self.dim, self.dim), self.poly_order,
                                       include_sine=include_sine, include_exp=include_exp)
 
@@ -988,7 +943,7 @@ class Incompressible(FlowSystemODE):
     def __init__(self, params=None, labels=['x', 'y'], min_dims=[-1.0,-1.0], max_dims=[1.0,1.0], poly_order=3, include_sine=False, include_exp=False, **kwargs):
         super().__init__(params, labels, min_dims=min_dims, max_dims=max_dims, **kwargs)
         self.poly_order = int(poly_order)
-        L = self.generate_mesh(min_dims=self.min_dims, max_dims=self.max_dims, num_lattice=self.num_lattice)
+        L = self.generate_mesh()
         L = torch.flip(L,(-1,))
         self.im_unit = torch.sqrt(torch.tensor(-1).cfloat())
 
@@ -1039,7 +994,7 @@ class Polynomial(FlowSystemODE):
         super().__init__(params, labels, min_dims=min_dims, max_dims=max_dims, **kwargs)
 
         self.poly_order = int(poly_order)
-        L = self.generate_mesh(min_dims=self.min_dims, max_dims=self.max_dims, num_lattice=self.num_lattice)
+        L = self.generate_mesh()
         self.library, self.library_terms = sindy_library(L.reshape(self.num_lattice**self.dim, self.dim), self.poly_order,
                                       include_sine=include_sine, include_exp=include_exp)
         self.library = self.library.float()
@@ -1123,30 +1078,35 @@ if __name__ == '__main__':
     # params = np.random.uniform(low=-2, high=2, size=dim * library_size(dim, poly_order))
 
     # saddlenode example
-    params = [2]
-    min_dims = [-2.,-2.]
-    max_dims = [2.,2.]
-    num_lattice = 5
-    kwargs = {'device': 'cpu', 'params': params, 'min_dims': min_dims, 'max_dims': max_dims, 'num_lattice': num_lattice}
-    DE = SaddleNode(**kwargs)
+    # params = [2]
+    # min_dims = [-2.,-2.]
+    # max_dims = [2.,2.]
+    # num_lattice = 5
+    # kwargs = {'device': 'cpu', 'params': params, 'min_dims': min_dims, 'max_dims': max_dims, 'num_lattice': num_lattice}
+    # DE = SaddleNode(**kwargs)
     
-    dx,dy = DE.fit_polynomial_representation(fit_with='lasso', poly_order=2)
-    print(dx)
-    print(dy)
+    # dx,dy = DE.get_polynomial_representation()
+    # print(dx)
+    # print(dy)
     
-    which_dims = [0,1]
-    fig, ax = plt.subplots(1, 2, figsize=(10,10))
-    DE.plot_vector_field(ax=ax[0], which_dims=which_dims)
-    DE.plot_trajectory(ax=ax[1], which_dims=which_dims)
-    plt.show()
+    # dx,dy = DE.fit_polynomial_representation(fit_with='lasso', poly_order=2, alpha=0)
+    # print(dx)
+    # print(dy)
+    
+    # which_dims = [0,1]
+    # fig, ax = plt.subplots(1, 2, figsize=(10,10))
+    # DE.plot_vector_field(ax=ax[0], which_dims=which_dims)
+    # DE.plot_trajectory(ax=ax[1], which_dims=which_dims)
+    # plt.show()
 
     # lorenz example
-    # params = [10,28,8/3]
-    # min_dims = [-30,-30,0]
-    # max_dims = [30,30,60]
-    # kwargs = {'device': 'cpu', 'params': params, 'min_dims': min_dims, 'max_dims': max_dims, 'num_lattice': 10}
-    # DE = Lorenz(**kwargs)
+    params = [10,28,8/3]
+    min_dims = [-30,-30,0]
+    max_dims = [30,30,60]
+    kwargs = {'device': 'cpu', 'params': params, 'min_dims': min_dims, 'max_dims': max_dims, 'num_lattice': 10}
+    DE = Lorenz(**kwargs)
 
+    DE.plot_trajectory_3d(T=10, alpha=0.1)
     # fig, ax = plt.subplots(2,3, figsize=(10,10))
     # z_slices = [0,5,9]
     # for iz, z_slice in enumerate(z_slices):
