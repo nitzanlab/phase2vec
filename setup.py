@@ -10,7 +10,10 @@ setup(
     install_requires=[
         'click>=8.1.3',
         'cycler>=0.11.0',
+        'decorator>=4.3.0',
         'functorch>=0.2.1',
+        'jupyterlab',
+        'notebook',
         'lightning-bolts>=0.5.0',
         'Markdown>=3.4.1',
         'MarkupSafe>=2.1.1',
