@@ -3,6 +3,9 @@ import numpy as np
 import os
 
 def load_dataset(data_path):
+    """
+    Load dataset from data_path
+    """
     # Load data
     X_train = np.load(os.path.join(data_path, 'X_train.npy'))
     X_test = np.load(os.path.join(data_path, 'X_test.npy'))
@@ -16,13 +19,13 @@ def load_dataset(data_path):
     p_test = np.load(os.path.join(data_path, 'p_test.npy'))
     return X_train, X_test, y_train, y_test, p_train, p_test
 
-def jacobian(f,spacings=1):
-    '''Returns the Jacobian of a batch of planar vector fields shaped batch x dim x spatial x spatial'''
+def jacobian(f, spacings=1):
+    """Returns the Jacobian of a batch of planar vector fields shaped batch x dim x spatial x spatial"""
     num_dims = f.shape[1]
-    return torch.stack([torch.stack(torch.gradient(f[:,i],dim=list(range(1,num_dims+1)), spacing=spacings)) for i in range(num_dims)]).movedim(2,0)
+    return torch.stack([torch.stack(torch.gradient(f[:,i], dim=list(range(1,num_dims+1)), spacing=spacings)) for i in range(num_dims)]).movedim(2,0)
 
 def curl(f, spacings=1):
-    '''Returns the curl of a batch of 2d (3d) vector fields shaped batch x dim x spatial x spatial (x spatial)'''
+    """Returns the curl of a batch of 2d (3d) vector fields shaped batch x dim x spatial x spatial (x spatial)"""
     num_dims = f.shape[1]
     if num_dims > 4:
         raise ValueError('Curl is only defined for dim <=3.')
@@ -48,15 +51,15 @@ def curl(f, spacings=1):
    
     return torch.stack([dFzdy - dFydz, dFxdz - dFzdx, dFydx - dFxdy]).movedim(1,0)
 
-def divergence(f,spacings=1):
-    '''Returns the divergence of a batch of planar vector fields shaped batch x dim x spatial x spatial'''
+def divergence(f, spacings=1):
+    """Returns the divergence of a batch of planar vector fields shaped batch x dim x spatial x spatial"""
 
     # J.shape = batch x dim x dim x [spatial]^n
     J = jacobian(f,spacings=spacings)
     return J[:,0,0] + J[:,1,1]
 
 def laplacian(f):
-    '''Calculate laplacian of vector field'''
+    """Calculate laplacian of vector field"""
     num_dims = f.shape[1]
     if num_dims>3:
         raise ValueError('Laplacian not yet implemented for dim>2.')
