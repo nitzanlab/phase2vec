@@ -1,10 +1,16 @@
 import os
 import torch
 import pickle
+import random
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from phase2vec.data._odes import *
+ 
+torch.manual_seed(0)
+np.random.seed(0)
+random.seed(0)
+
 
 class SystemFamily():
     """
@@ -72,7 +78,7 @@ class SystemFamily():
 
         return generator
 
-    def __init__(self, data_name, data_dir=None, device=None, min_dims=None, max_dims=None, num_lattice=64, param_ranges=None, param_groups=None, default_sampler='uniform', seed=0, **kwargs):
+    def __init__(self, data_name, data_dir=None, device=None, min_dims=None, max_dims=None, num_lattice=64, param_ranges=None, param_groups=None, default_sampler='uniform', **kwargs):
         """
         Generate a system family
         :param data_name: name of system
@@ -83,13 +89,6 @@ class SystemFamily():
         :param max_dims: maximum range of dimensions to use
         :param kwargs: any arguments of a general system
         """
-
-        # Reproducibility
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-        import random
-        random.seed(seed)
-
         self.data_name = data_name
         self.pde = False
          
@@ -123,7 +122,7 @@ class SystemFamily():
         self.DE_ex = DE_ex
         if self.data_name != 'grayscott': # TODO: ask isinstance(generator, ODE/PDE)
             # TODO: can generator.param can be used as default?
-            self.L = self.DE_ex.generate_mesh(num_lattice=num_lattice, min_dims=self.min_dims, max_dims=self.max_dims) # min_dims, max_dims, num_lattice
+            self.L = self.DE_ex.generate_mesh() # min_dims, max_dims, num_lattice
             self.L = self.L.to(device).float()
 
         self.kwargs = kwargs
@@ -332,7 +331,7 @@ class SystemFamily():
             nrow = num_samples
             skip = 2
         
-        fig, axs = plt.subplots(nrow, ncol, figsize=(6*ncol, 6*nrow))
+        fig, axs = plt.subplots(nrow, ncol, figsize=(6*ncol, 6*nrow), tight_layout=False, constrained_layout=True)
         axs = axs.flatten()
         for i in range(num_samples):
             ax = axs[skip*i]
@@ -346,12 +345,21 @@ class SystemFamily():
         plt.show()
 
 if __name__ == '__main__':
-    poly_order = 3
-    dim = 2
-    nparams = library_size(dim, poly_order=poly_order) * 2
-    sf = SystemFamily(data_name='polynomial', param_ranges=[[-2, 2]] * nparams, data_dir=None, device='cpu', poly_order=poly_order)
+    # poly_order = 3
+    # dim = 2
+    # nparams = library_size(dim, poly_order=poly_order) * 2
+    # sf = SystemFamily(data_name='polynomial', param_ranges=[[-2, 2]] * nparams, data_dir=None, device='cpu', poly_order=poly_order)
+    # sf.plot_vector_fields(param_selection='random', num_samples=4, add_trajectories=True)
+    # plt.show()
+
+    params = [10, 28, 8/3]
+    param_ranges = np.array([params]).T @ np.array([[0.5, 1.5]])
+    param_ranges = param_ranges.tolist()
+    min_dims = [-30, -30, 0]
+    max_dims = [30, 30, 60]
+    poly_order = 2
+    sf = SystemFamily(data_name='lorenz', param_ranges=param_ranges, data_dir=None, device='cpu', poly_order=poly_order)
     sf.plot_vector_fields(param_selection='random', num_samples=4, add_trajectories=True)
     plt.show()
-
 
 
