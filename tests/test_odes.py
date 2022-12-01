@@ -132,7 +132,14 @@ def DE_inst(request):
         num_lattice = 5
         params = [2]
         device = 'cpu'
-        DE = p2v.dt.SaddleNode(params=params, min_dims=min_dims, max_dims=max_dims, 
+        DE = p2v.dt._odes.SaddleNode(params=params, min_dims=min_dims, max_dims=max_dims, 
+                            num_lattice=num_lattice, device=device)
+    if request.param == 'lorenz':
+        params = [10,28,8/3]
+        min_dims = [-30,-30,0]
+        max_dims = [30,30,60]
+        num_lattice = 5
+        DE = p2v.dt._odes.Lorenz(params=params, min_dims=min_dims, max_dims=max_dims, 
                             num_lattice=num_lattice, device=device)
     return DE
 
@@ -198,7 +205,7 @@ def DE_polynomial3d():
                                                             ([1,2], [2,0,0], {0: -9}),
                                                             ([2,0], [2,0,0], {1: -6}),])
 def test_slicing(DE_polynomial3d, which_dims, slice_lattice, ans):
-    _,_,slice_dict = DE_polynomial3d.get_vector_field(which_dims=which_dims, slice_lattice=slice_lattice)
+    _,_,slice_dict = DE_polynomial3d.get_vector_field(which_dims=which_dims, slice_lattice=slice_lattice, return_slice_dict=True)
     k,v = list(slice_dict.items())[0]
     k_ans,v_ans = list(ans.items())[0]
     assert_at_pt(k, k_ans)
@@ -208,7 +215,10 @@ def test_slicing(DE_polynomial3d, which_dims, slice_lattice, ans):
 # test divergence
 
 # test curl
-############################################## Lorenz ##############################################
 
-# test for 3d system - lorenz
-# 
+# test vector field from trajectory
+@pytest.mark.parametrize("DE_inst, ans_inst", instances, indirect=True)
+def test_vector_field_from_trajectory(DE_inst, ans_inst):
+    coords, vectors = DE_inst.get_vector_field_from_trajectory(n_trajs=200, T=10, alpha=0.01)
+    # assert np.all(coords == ans_inst['coords_xy'])
+    # assert np.all(vectors == ans_inst['vectors'])
