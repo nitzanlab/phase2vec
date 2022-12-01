@@ -11,7 +11,7 @@ from phase2vec.data._polynomials import sindy_library, library_size
 from time import time
 from sklearn import linear_model
 from phase2vec.data._utils import curl
-
+from scipy.stats import binned_statistic_dd
 
 class FlowSystemODE(torch.nn.Module):
     """
@@ -109,37 +109,44 @@ class FlowSystemODE(torch.nn.Module):
 
 
     def get_vector_field(self, which_dims=[0,1], min_dims=None, max_dims=None, num_lattice=None, 
-                        slice_lattice=None):
+                        slice_lattice=None, coords=None, vectors=None, return_slice_dict=False):
         """
         Returns a vector field of the system
         """
-        coords = self.generate_mesh(min_dims=min_dims, max_dims=max_dims, num_lattice=num_lattice, indexing='xy').to(self.device)
-        vector_dims = [self.num_lattice] * self.dim + [self.dim]
-        vectors = self.forward(0, coords).detach().numpy().reshape(vector_dims)
-        coords = coords.numpy()
+        if coords is None:
+            coords = self.generate_mesh(min_dims=min_dims, max_dims=max_dims, num_lattice=num_lattice, indexing='xy').to(self.device)
+        dim = coords.shape[-1]
+        if vectors is None:
+            vector_dims = [self.num_lattice] * dim + [dim]
+            vectors = self.forward(0, coords).detach().numpy().reshape(vector_dims)
+            
+        coords = coords.numpy() if isinstance(coords, torch.Tensor) else coords
 
         # validate slice_lattice
         if slice_lattice is None:
-            slice_lattice = [self.num_lattice // 2] * (self.dim)
+            slice_lattice = [self.num_lattice // 2] * (dim)
 
         slice_lattice = np.array(slice_lattice)
 
-        if (len(slice_lattice) < self.dim) or np.any(slice_lattice > self.num_lattice) or np.any(slice_lattice < 0):
+        if (len(slice_lattice) < dim) or np.any(slice_lattice > self.num_lattice) or np.any(slice_lattice < 0):
             raise ValueError('slice_lattice must be of length dim and within the range of num_lattice')
 
         # slice vector field
         idx = [slice(None)] * len(coords.shape)
         slice_dict = {}
-        for i in range(self.dim):
+        for i in range(dim):
             if i not in which_dims:
                 idx[i] = slice_lattice[i]
-                slice_dict[i] = coords[(slice_lattice[i],) * self.dim][..., i]
+                slice_dict[i] = coords[(slice_lattice[i],) * dim][..., i]
 
         idx = tuple(idx)
         coords = coords[idx][..., which_dims]
         vectors = vectors[idx][..., which_dims]
 
-        return coords, vectors, slice_dict
+        if return_slice_dict:
+            return coords, vectors, slice_dict
+        else:
+            return coords, vectors
 
     def generate_mesh(self, min_dims=None, max_dims=None, num_lattice=None, indexing='ij'):
         """
@@ -155,7 +162,7 @@ class FlowSystemODE(torch.nn.Module):
         Plot multiple trajectories
         """
         xdim, ydim = which_dims
-        coords, vectors, slice_dict = self.get_vector_field(which_dims=which_dims, slice_lattice=slice_lattice)
+        coords, vectors, slice_dict = self.get_vector_field(which_dims=which_dims, slice_lattice=slice_lattice, return_slice_dict=True)
         X = coords[..., xdim]
         Y = coords[..., ydim]
         U = vectors[..., xdim]
@@ -181,35 +188,87 @@ class FlowSystemODE(torch.nn.Module):
         ax.set_ylabel(self.labels[ydim])
         ax.set_title(title,fontsize=8)
 
-    def plot_trajectory_3d(self, T, alpha, min_dims=None, max_dims=None, ax=None, which_dims=[0,1,2], n_traj=2, title=''):
+    def get_trajectories(self, n_trajs, T, alpha, init=None, clip=False, min_dims=None, max_dims=None):
+        """
+        Get multiple trajectories
+    
+        """
+        min_dims, max_dims, _ = self.get_lattice_params(min_dims=min_dims, max_dims=max_dims)
+        inits = torch.tensor(np.random.uniform(min_dims, max_dims, (n_trajs, self.dim)) )
+        trajectories = []
+        for init in inits:
+            trajectory = self.run(T, alpha=alpha, init=init, clip=clip).detach().cpu().numpy()
+            trajectories.append(trajectory)
+
+        return trajectories
+        
+    def plot_trajectory_3d(self, T, alpha, min_dims=None, max_dims=None, ax=None, which_dims=[0,1,2], n_trajs=2, title=''):
         """
         Plots trajectory over a 3d grid
         """
-        d = 3
+        d = len(which_dims)
         if self.dim < d:
             raise ValueError('System must be at least 3d')
 
         assert len(which_dims) == d
         xdim, ydim, zdim = which_dims
-        L = self.generate_mesh(min_dims=min_dims, max_dims=max_dims, indexing='xy').to(self.device)
-        min_dims = L[..., which_dims].reshape(-1,d).min(dim=0)[0]
-        max_dims = L[..., which_dims].reshape(-1,d).max(dim=0)[0]
-        inits = (max_dims - min_dims) * torch.rand(n_traj, d) + min_dims
+        trajectories = self.get_trajectories(n_trajs=n_trajs, T=T, alpha=alpha, min_dims=min_dims, max_dims=max_dims)
         fig = plt.figure()
         ax = plt.axes(projection='3d')
-        for init in inits:
-            trajectory = self.run(T, alpha=alpha, init=init, clip=False).detach().cpu().numpy()
+        for trajectory in trajectories:
             p = ax.plot(trajectory[..., xdim], trajectory[..., ydim], trajectory[..., zdim], linewidth=1, alpha=.5, color='blue')
             ax.scatter(trajectory[-1, xdim], trajectory[-1, ydim], trajectory[-1, zdim], c='red', marker='x', s=64)
         
-        # ax.set_xlim([min_dims[xdim], max_dims[xdim]])
-        # ax.set_ylim([min_dims[ydim], max_dims[ydim]])
-        # ax.set_zlim([min_dims[zdim], max_dims[zdim]])
         ax.set_xlabel(self.labels[xdim])
         ax.set_ylabel(self.labels[ydim])
         ax.set_zlabel(self.labels[zdim])
         ax.set_title(title)
         plt.show()
+
+    def get_vector_field_from_trajectories(self, n_trajs, T, alpha, which_dims=[0,1], num_lattice=None, min_dims=None, max_dims=None, slice_lattice=None):
+        """
+        Generates a vector field from multiple trajectories
+        """
+        trajectories = self.get_trajectories(n_trajs=n_trajs, T=T, alpha=alpha, min_dims=min_dims, max_dims=max_dims)
+        coords = self.generate_mesh(min_dims=min_dims, max_dims=max_dims, num_lattice=num_lattice).cpu().numpy()
+        
+        # trajectory coordinates
+        traj_coords = []
+        for trajectory in trajectories:
+            traj_coords.append((trajectory[:-1] + trajectory[1:]) / 2)
+        traj_coords = np.array(traj_coords).reshape(-1, self.dim)#.tolist()
+        
+        # trajectory vectors
+        traj_vectors = []
+        for trajectory in trajectories:
+            traj_vectors.append(np.diff(trajectory, axis=0) / alpha)
+        traj_vectors = np.array(traj_vectors).reshape(-1, self.dim)#.tolist()
+        # v = np.diff(trajectories, axis=0).reshape(-1, self.dim) / alpha
+
+        # masking inf values
+        mask = np.isfinite(traj_vectors).all(axis=1)
+        if ~np.all(mask):
+            print('Masking %d inf / %d values' % ((~mask).sum(), len(mask)))
+            traj_coords = traj_coords[mask]
+            traj_vectors = traj_vectors[mask]
+
+        # binning
+        range_ = [[mn,mx] for mn,mx in zip(self.min_dims, self.max_dims)]
+        vs = []
+        for d in np.arange(self.dim):
+            v_d = binned_statistic_dd(traj_coords, traj_vectors[:,d], statistic='mean', bins=self.num_lattice, range=range_)
+            vs.append(v_d.statistic)
+        vectors = np.stack(vs, axis=-1)
+
+        # slice
+        coords, vectors = self.get_vector_field(coords=coords, vectors=vectors, which_dims=which_dims, num_lattice=num_lattice, min_dims=min_dims, max_dims=max_dims, slice_lattice=slice_lattice)
+        
+        return coords, vectors
+
+    # def get_ode_class(self):
+    #     for g, gp in enumerate(self.recommended_param_groups):
+    #         if np.all([par >= gp[p][0] and par <= gp[p][1] for p, par in enumerate(self.params)]): 
+    #             model.label = g
 
 
     def params_str(self, s=''):
@@ -223,7 +282,8 @@ class FlowSystemODE(torch.nn.Module):
         return s
 
 
-    def plot_vector_field(self, which_dims=[0, 1], ax=None, min_dims=None, max_dims=None, num_lattice=None, title='', slice_lattice=None):
+    def plot_vector_field(self, which_dims=[0, 1], ax=None, min_dims=None, max_dims=None, num_lattice=None, 
+                          title='', slice_lattice=None, coords=None, vectors=None):
         """
         Plot the vector field induced on a lattice
         :param which_dims: which dimensions to plot
@@ -234,7 +294,9 @@ class FlowSystemODE(torch.nn.Module):
         
         xdim, ydim = which_dims
 
-        coords, vectors, slice_dict = self.get_vector_field(which_dims=which_dims, min_dims=min_dims, max_dims=max_dims, num_lattice=num_lattice, slice_lattice=slice_lattice)
+        coords, vectors, slice_dict = self.get_vector_field(which_dims=which_dims, min_dims=min_dims, max_dims=max_dims, num_lattice=num_lattice, 
+                                                            slice_lattice=slice_lattice, 
+                                                            coords=coords, vectors=vectors, return_slice_dict=True)
         ax.quiver(coords[..., xdim], coords[..., ydim], 
                   vectors[..., xdim], vectors[..., ydim],)
 
@@ -276,7 +338,7 @@ class FlowSystemODE(torch.nn.Module):
         # defaults to least square fitting
         L = self.generate_mesh()
         z_dims = [self.num_lattice] * self.dim + [self.dim]
-        z = self.forward(0, torch.tensor(L).float().reshape(-1, self.dim)).reshape(z_dims)
+        z = self.forward(0, torch.tensor(L).float().reshape(-1, self.dim)).reshape(z_dims) # TODO: replace with self.get_vector_field
 
         library, library_terms = sindy_library(L.reshape(self.num_lattice**self.dim, self.dim), poly_order=poly_order)
 
@@ -905,12 +967,62 @@ class Lorenz(FlowSystemODE):
         
 
 class Linear(FlowSystemODE):
+    """
+    2D linear system of equations:
+
+        [xdot, ydot] = A[x,y]
+    """
 
     min_dims = [-1.,-1.]
     max_dims = [1., 1.]
     recommended_param_ranges = 4 * [[-1.,1.]]
 
     recommended_param_groups = [recommended_param_ranges]
+
+    def get_ode_class(self):
+        """
+        Determine the ode class of the system
+        """
+        params = self.params
+        A = np.array([[params[0], params[1]], [params[2], params[3]]])
+        A = np.array(self.params).reshape(-1, self.dim) # TODO: test
+        tr = np.trace(A)
+        det = np.linalg.det(A)
+        delta = tr**2 - 4*det
+
+        if det < 0:
+            # Saddle
+            ode_class = 0
+        elif det > 0:
+                if tr > 0:
+                    if det < delta:
+                        # Source
+                        ode_class = 1
+                    elif det > delta:
+                        # Spiral source
+                        ode_class = 2
+                    else:
+                        # Degenerate source
+                        ode_class = -1
+                elif tr < 0:
+                    if det < delta:
+                        # Sink
+                        ode_class = 3
+                    elif det > delta:
+                        # Spiral sink
+                        ode_class = 4
+                    else:
+                        # Degenerate sink
+                        ode_class = -1
+                else:
+                    # Center
+                    ode_class=-1
+        else:
+            # Line
+            ode_class = -1
+        return ode_class
+    
+
 
     def forward(self, t, z, **kwargs):
 
@@ -1036,6 +1148,9 @@ class Polynomial(FlowSystemODE):
     
         return zdot
 
+    def get_ode_class(self):
+        return 0
+
     def params_str(self, s=''):
         """
         Sparse representation of the parameters.
@@ -1102,12 +1217,12 @@ if __name__ == '__main__':
     # params = np.random.uniform(low=-2, high=2, size=dim * library_size(dim, poly_order))
 
     # saddlenode example
-    # params = [2]
-    # min_dims = [-2.,-2.]
-    # max_dims = [2.,2.]
-    # num_lattice = 5
-    # kwargs = {'device': 'cpu', 'params': params, 'min_dims': min_dims, 'max_dims': max_dims, 'num_lattice': num_lattice}
-    # DE = SaddleNode(**kwargs)
+    params = [2]
+    min_dims = [-2.,-2.]
+    max_dims = [2.,2.]
+    num_lattice = 5
+    kwargs = {'device': 'cpu', 'params': params, 'min_dims': min_dims, 'max_dims': max_dims, 'num_lattice': num_lattice}
+    DE = SaddleNode(**kwargs)
     # DE.plot_vector_field()
     # dx,dy = DE.get_polynomial_representation()
     # print(dx)
@@ -1124,29 +1239,20 @@ if __name__ == '__main__':
     # plt.show()
 
     # polynomial 3d
-    dim = 3
-    poly_order=2
-    params = np.random.uniform(low=-2, high=2, size=dim * library_size(dim, poly_order)).reshape(-1, dim)
-    kwargs = {'device': 'cpu', 'params': params, 
-              'dim':dim, 'poly_order':2, 
-              'min_dims': [-10, -6, -2], #[-2.,] * dim, 
-              'max_dims': [-8, -4, 0], #[2.,] * dim, 
-              'num_lattice': 5, 
-              'labels': ['x', 'y', 'z']}
-    DE = Polynomial(**kwargs)
-    L,_,slice_dict = DE.get_vector_field(which_dims=[0,1]) # x2 = -1
-    print(f'Expecting: x2 = -1, Got:{slice_dict}')
-    L,_,slice_dict = DE.get_vector_field(which_dims=[0,1], slice_lattice=[0,0,0]) # x2 = -2
-    print(f'Expecting: x2 = -2, Got:{slice_dict}')
-    L,_,slice_dict = DE.get_vector_field(which_dims=[1,2], slice_lattice=[2,0,0]) # x0 = -9
-    print(f'Expecting: x0 = -9, Got:{slice_dict}')
-    L,_,slice_dict = DE.get_vector_field(which_dims=[2,0], slice_lattice=[2,0,0]) # x1 = -6
-    print(f'Expecting: x1 = -6, Got:{slice_dict}')
-
-    DE.plot_vector_field(which_dims=[0,1])
-    plt.show()
-    DE.plot_trajectory_3d(T=10, alpha=0.1)
-    plt.show()
+    # dim = 3
+    # poly_order=2
+    # params = np.random.uniform(low=-2, high=2, size=dim * library_size(dim, poly_order)).reshape(-1, dim)
+    # kwargs = {'device': 'cpu', 'params': params, 
+    #           'dim':dim, 'poly_order':2, 
+    #           'min_dims': [-10, -6, -2], #[-2.,] * dim, 
+    #           'max_dims': [-8, -4, 0], #[2.,] * dim, 
+    #           'num_lattice': 5, 
+    #           'labels': ['x', 'y', 'z']}
+    # DE = Polynomial(**kwargs)
+    # DE.plot_vector_field(which_dims=[0,1])
+    # plt.show()
+    # DE.plot_trajectory_3d(T=10, alpha=0.1)
+    # plt.show()
 
     # # lorenz example
     # params = [10,28,8/3]
@@ -1154,6 +1260,31 @@ if __name__ == '__main__':
     # max_dims = [30,30,60]
     # kwargs = {'device': 'cpu', 'params': params, 'min_dims': min_dims, 'max_dims': max_dims, 'num_lattice': 10}
     # DE = Lorenz(**kwargs)
+    coords1, vectors1 = DE.get_vector_field_from_trajectories(n_trajs=200, T=10, alpha=0.01)
+    coords2, vectors2 = DE.get_vector_field()
+
+    fig,ax = plt.subplots(1,2,figsize=(10,5))
+    DE.plot_vector_field(ax=ax[0], coords=coords1, vectors=vectors1)
+    DE.plot_vector_field(ax=ax[1], coords=coords2, vectors=vectors2)
+    plt.show()
+
+    fig,ax = plt.subplots(1,2,figsize=(10,5))
+    ax[0].hist(vectors2[:,:,0].flatten())
+    ax[0].hist(vectors1[:,:,0].flatten())
+
+    ax[1].hist(vectors2[:,:,1].flatten())
+    ax[1].hist(vectors1[:,:,1].flatten())
+    plt.show()
+    
+    # computing difference between vector fields
+    # a = np.linalg.norm(vectors1 - vectors2, axis=-1)
+    p = 2
+    a = (vectors2 - vectors1) ** p
+    a = np.ma.array(a, mask=np.isnan(a))
+    a = np.power(np.sum(a, axis=-1), 1 / p) # l2 error per position
+    err = np.mean(a)
+    print(err)
+    
 
     # DE.plot_trajectory_3d(T=10, alpha=0.01, n_traj=1)
     # fig, ax = plt.subplots(2,3, figsize=(10,10))
