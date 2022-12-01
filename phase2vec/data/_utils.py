@@ -64,3 +64,18 @@ def laplacian(f):
     if num_dims>3:
         raise ValueError('Laplacian not yet implemented for dim>2.')
     return torch.stack([divergence(torch.stack(torch.gradient(f[:,i], dim=[1,2])).movedim(1,0)) for i in range(num_dims)]).movedim(1,0)
+
+# TODO: create evalution file?
+def vector_field_lp_dist(vectors1, vectors2, p=2, coords1=None, coords2=None):
+    """Calculate the lp distance between two vector fields
+    :param vectors1: vector field 1 - shape (spatial x dim, dim) #(batch, dim, spatial, spatial)
+    """
+    if coords1 != coords2:
+        # TODO: implement interpolation?
+        raise ValueError('Vector fields must be defined on the same grid.')
+    
+    a = (vectors2 - vectors1) ** p
+    a = np.ma.array(a, mask=np.isnan(a))
+    a = np.power(np.sum(a, axis=-1), 1/p) # error per position
+    err = np.mean(a)
+    return err
