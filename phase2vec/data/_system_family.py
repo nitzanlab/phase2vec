@@ -6,11 +6,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from phase2vec.data._odes import *
+from sklearn.model_selection import train_test_split
+from phase2vec.utils import ensure_dir
  
-torch.manual_seed(0)
-np.random.seed(0)
-random.seed(0)
-
 
 class SystemFamily():
     """
@@ -78,22 +76,48 @@ class SystemFamily():
 
         return generator
 
-    def __init__(self, data_name, data_dir=None, device=None, min_dims=None, max_dims=None, num_lattice=64, param_ranges=None, param_groups=None, default_sampler='uniform', **kwargs):
+
+    @staticmethod
+    def get_sampler(sampler_type):
+        """
+        Selecting supported sampler
+        """
+        if (sampler_type == 'uniform') or (sampler_type == 'random'):
+            sampler = SystemFamily.params_random
+        elif sampler_type == 'extreme':
+            sampler = SystemFamily.params_extreme
+        elif sampler_type == 'sparse':
+            sampler = SystemFamily.params_sparse
+        elif sampler_type == 'control':
+            sampler = SystemFamily.params_control
+        else:
+            raise ValueError('Param sampler not recognized.')
+
+        return sampler
+
+
+
+    def __init__(self, data_name, device=None, min_dims=None, max_dims=None, num_lattice=64, 
+                param_ranges=None, param_groups=None, seed=0, **kwargs):
         """
         Generate a system family
         :param data_name: name of system
         :param param_ranges: range for each param in model, 
-        :param data_dir: directory to save data
         :param device: device to use
         :param min_dims: minimum range of dimensions to use
         :param max_dims: maximum range of dimensions to use
         :param kwargs: any arguments of a general system
         """
+
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
+
         self.data_name = data_name
         self.pde = False
          
         DE = SystemFamily.get_generator(self.data_name)
-        self.data_dir = os.path.abspath(data_dir) if data_dir is not None else '.'
+        # self.data_dir = os.path.abspath(data_dir) if data_dir is not None else '.'
 
         # if not provided, use ode suggested params
         self.param_ranges = DE.recommended_param_ranges if param_ranges is None else param_ranges
@@ -101,20 +125,12 @@ class SystemFamily():
         self.min_dims = DE.min_dims if min_dims is None else min_dims
         self.max_dims = DE.max_dims if max_dims is None else max_dims
 
-        # Num classes
-        if self.data_name == 'linear':
-            self.num_classes = 5
-        elif self.data_name == 'polynomial':
-            self.num_classes = 1
-        else:
-            self.num_classes = len(self.param_groups)
-
         # general DE params
         self.device = device
         params = self.params_random(1)
         DE_ex = DE(params=params[0], device=device, min_dims=self.min_dims, max_dims=self.max_dims, num_lattice=num_lattice, **kwargs)
         data_info = DE_ex.get_info()
-        data_info = {**self.__dict__, **data_info} # merge dictionaries
+        # data_info = {**self.__dict__, **data_info} # merge dictionaries
         self.data_info = data_info
         self.num_lattice = num_lattice
         self.dim = DE_ex.dim
@@ -122,124 +138,12 @@ class SystemFamily():
         self.DE_ex = DE_ex
         if self.data_name != 'grayscott': # TODO: ask isinstance(generator, ODE/PDE)
             # TODO: can generator.param can be used as default?
-            self.L = self.DE_ex.generate_mesh() # min_dims, max_dims, num_lattice
-            self.L = self.L.to(device).float()
+            self.coords = self.DE_ex.generate_mesh() # min_dims, max_dims, num_lattice
+            self.coords = self.coords.to(device).float()
 
         self.kwargs = kwargs
-        if default_sampler == 'uniform':
-            self.param_sampler = self.params_random
-        elif default_sampler == 'extreme':
-            self.param_sampler = self.params_extreme
-        elif default_sampler == 'sparse':
-            self.param_sampler = self.params_sparse
-        elif default_sampler == 'control':
-            self.param_sampler = self.params_control
-        else:
-            raise ValueError('Param sampler not recognized.')
-       
-    def set_label(self, model, params, linear=False, polynomial=False):
-        if linear:
-            A = np.array([[params[0],params[1]],[params[2], params[3]]])
-            tr = np.trace(A)
-            det = np.linalg.det(A)
-            delta = tr**2 - 4*det
 
-            if det < 0:
-                # Saddle
-                label = 0
-            elif det > 0:
-                 if tr > 0:
-                     if det < delta:
-                         # Source
-                         label = 1
-                     elif det > delta:
-                         # Spiral source
-                         label = 2
-                     else:
-                         # Degenerate source
-                         label = -1
-                 elif tr < 0:
-                     if det < delta:
-                         # Sink
-                         label = 3
-                     elif det > delta:
-                         # Spiral sink
-                         label = 4
-                     else:
-                         # Degenerate sink
-                         label = -1
-                 else:
-                     # Center
-                     label=-1
-            else:
-                # Line
-                label = -1
-            model.label = label
-
-        elif polynomial:
-            model.label = 0
-        else:
-            for g, gp in enumerate(self.param_groups):
-                if np.all([par >= gp[p][0] and par <= gp[p][1] for p, par in enumerate(params)]): 
-                    model.label = g
-
-    def generate_model(self, params, set_label=True, **kwargs):
-        """
-        Generate model with params
-        """
-        kwargs = {**self.data_info, **kwargs}  # merge dictionaries
-        if self.data_name == 'grayscott':
-            model = self.DE(self.num_lattice, params=torch.tensor(params), **kwargs)
-        elif self.data_name == 'neural_ode':
-            model = self.DE(params, **kwargs)
-        else:
-            model = self.DE(params=torch.tensor(params), **kwargs)
-            if set_label:
-                self.set_label(model, params, linear=(self.data_name=='linear'), polynomial=(self.data_name=='polynomial'))
-        return model
-
-    def generate_flow(self, params, **kwargs):
-        """
-        Generate flow over system with params
-        """
-        model = self.generate_model(params, **kwargs)
-        if self.data_name != 'grayscott':
-            flow = model.forward(0, torch.tensor(self.L).float())
-        else:
-            print('TODO')
-            T = 10000  # 2000
-            alpha = 100  # 1.
-            flow = model.run(T, alpha=alpha, noise_magnitude=0.2)  # TODO: what is this noise magnitude?
-            flow = flow[-1, ...].reshape(self.num_lattice, self.num_lattice, 2).detach().numpy()
-        return flow
-
-
-    def make_data(self, num_samples):
-        """
-        Generates data of system
-        data_name - name of system
-        param_ranges - range for each param in model
-        """
-
-        train_dir = os.path.abspath(os.path.join(self.data_dir, 'train', '0'))
-        test_dir = os.path.abspath(os.path.join(self.data_dir, 'test', '0'))
-
-        for dr in [train_dir, test_dir]:
-            if not os.path.exists(dr):
-                os.makedirs(dr)
-
-        all_params = self.params_random(2*num_samples).T
-        
-        for dt, dr, nm in zip([all_params[:, :num_samples], all_params[:, num_samples:]], [train_dir, test_dir], ['Train', 'Test']):
-            print('Generating {} Set'.format(nm))
-            for d, params in tqdm(enumerate(dt.T)):
-                #data = np.array([.1, .05, .0545, .062])
-
-                flow = self.generate_flow(params)
-
-                fn = os.path.join(dr,  'flow%05i.pkl' % d)
-                with open(fn, 'wb') as f:
-                    pickle.dump((flow, params), f)
+        # self.param_sampler = SystemFamily.get_sampler(sampler_type)
 
 ######################################## Param sampling methods ########################################################
 
@@ -304,24 +208,147 @@ class SystemFamily():
                 coeffs[ind,i] = sgn * 1.
         return coeffs.reshape(-1).unsqueeze(0).numpy()
 
-    def plot_vector_fields(self, params=None, param_selection='random', add_trajectories=False, **kwargs):
+######################################## Flow noise functions ########################################################
+
+    def noise_flow_gaussian(self, flow, noise_level):
+        """
+        Add gaussian noise to flow
+        """
+        noise = np.random.randn(flow.shape) * noise_level
+        return flow + noise
+
+    def noise_flow_mask(self, flow, noise_level):
+        """
+        Add mask noise to flow
+        """
+        mask = np.random.randn(flow.shape) < noise_level
+        return flow * mask
+
+    def noise_flow(self, flow, noise_type, noise_level):
+        """
+        Add noise to parameters
+        """
+        if noise_type == 'gaussian':
+            return self.noise_flow_gaussian(flow, noise_level)
+        if noise_type == 'mask':
+            return self.noise_flow_mask(flow, noise_level)
+        else:
+            return flow
+
+######################################## Params noise functions ########################################################
+
+    def noise_params_gaussian(self, params, noise_level):
+        """
+        Add gaussian noise to parameters
+        """
+        noise = torch.randn_like(params) * noise_level
+        return params + noise
+
+    def noise_params(self, params, noise_type, noise_level):
+        """
+        Add noise to parameters
+        """
+        if noise_type == 'params_gaussian':
+            return self.noise_params_gaussian(params, noise_level)
+        else:
+            return params
+
+######################################## Data generation ########################################################
+
+    def generate_flows(self, num_samples, noise_type=None, noise_level=None, sampler_type='random', params=None):
+        """
+        Generate original and perturbed params and flows
+        """
+        # kwargs = {**self.data_info, **kwargs}
+        sampler = SystemFamily.get_sampler(sampler_type)
+        params = params if params else sampler(self, num_samples)
+        
+        params_pert = self.noise_params(params, noise_type, noise_level=noise_level)
+        
+        vectors = []
+        vectors_pert = []
+
+        for p, p_pert in zip(params, params_pert):
+
+            DE = self.DE(params=p, **self.data_info)
+            _, v = DE.get_vector_field()
+            
+            DE_pert = self.DE(params=p_pert, **self.data_info)
+            if noise_type == 'trajectory':
+                _, v_pert = DE_pert.get_vector_field_from_trajectory()
+            else:
+                _, v_pert = DE_pert.get_vector_field()
+            
+            vectors.append(v)
+            vectors_pert.append(v_pert)
+
+        vectors = np.stack(vectors)
+        vectors_pert  = np.stack(vectors_pert)
+
+        _, vectors_pert = self.noise_flow(vectors_pert, noise_type, noise_level=noise_level)
+
+        return params_pert, vectors_pert, params, vectors
+
+
+    # def make_data(self, test_size, train_size, sampler_type='uniform', noise_type=None, **kwargs):
+    #     """
+    #     Generates data of system
+    #     """
+    #     ensure_dir(self.data_dir)
+        # train_dir = os.path.abspath(os.path.join(self.data_dir, 'train', '0'))
+        # test_dir = os.path.abspath(os.path.join(self.data_dir, 'test', '0'))
+
+        # for dr in [train_dir, test_dir]:
+        #     if not os.path.exists(dr):
+        #         os.makedirs(dr)
+
+        # num_samples = test_size + train_size
+        # params_pert, flow_pert, params, flow = self.generate_flows(num_samples=num_samples, noise_type=noise_type, sampler_type=sampler_type, **kwargs)
+
+        # all_data   = torch.stack(all_data).numpy().transpose(0,3,1,2)
+        # all_pars   = torch.stack(all_pars).numpy()
+        # all_labels = np.array(all_labels)
+
+        # split = train_test_split(params_pert, flow_pert, params, flow, test_size=test_size, train_size=train_size, stratify=all_labels, random_state=seed)
+        # filenames = ['p_pert', 'X_pert', 'p', 'X'] * ['_'] * ['train', 'test']
+        # for dt, nm in zip(split, ['X_train', 'X_test', 'y_train', 'y_test', 'p_train', 'p_test']):
+        #     np.save(os.path.join(self.data_dir, nm + '.npy'), dt)
+
+        # for dt, dr, nm in zip([all_params[:, :num_samples], all_params[:, num_samples:]], [train_dir, test_dir], ['Train', 'Test']):
+        #     print('Generating {} Set'.format(nm))
+        #     for d, params in tqdm(enumerate(dt.T)):
+        #         #data = np.array([.1, .05, .0545, .062])
+
+        #         flow = self.generate_flow(params)
+
+        #         fn = os.path.join(dr,  'flow%05i.pkl' % d)
+        #         with open(fn, 'wb') as f:
+        #             pickle.dump((flow, params), f)
+
+######################################## Plotting ########################################################
+
+    def plot_noised_vector_fields(self, num_samples, noise_type, noise_level, params=None, **kwargs):
+        """
+        Plot original and perturbed vector fields
+        """
+        params_pert, flow_pert, params, flow = self.generate_flows(num_samples=num_samples, params=params, noise_type=noise_type, noise_level=noise_level, **kwargs)
+        # self.plot_vector_fields(params_pert, flow_pert, params, flow, **kwargs)
+        fig, axs = plt.subplots(num_samples,2, figsize=(10,5))
+        for i, (f, f_pert) in enumerate(zip(flow, flow_pert)):
+            self.plot_vector_field(f, ax=axs[i, 0])
+            self.plot_vector_field(f_pert, ax=axs[i, 1])
+
+        plt.show()
+    
+    def plot_vector_fields(self, params=None, sampler_type='uniform', add_trajectories=False, **kwargs):
         """
         Plot vector fields of system
         :param params: array of params for system
         :param param_selection: plot extreme (minimal, intermediate and maximal bounds) param combinations
         :param kwargs: additional params for sampling method
         """
-        if param_selection == 'random':
-            params = self.params_random(**kwargs)
-        elif param_selection == 'extreme':
-            params = self.params_extreme()
-        # elif param_selection == 'grid':
-        #     pass
-        elif param_selection == 'sparse':
-            params = self.params_sparse(**kwargs)
-        else:
-            raise ValueError('param_selection must be random, extreme or sparse')
-        
+        sampler = SystemFamily.get_sampler(sampler_type)
+        params = sampler(self, **kwargs)
         num_samples = params.shape[0]
         skip = 1
 
@@ -344,6 +371,8 @@ class SystemFamily():
         plt.tight_layout()
         plt.show()
 
+
+
 if __name__ == '__main__':
     # poly_order = 3
     # dim = 2
@@ -352,14 +381,20 @@ if __name__ == '__main__':
     # sf.plot_vector_fields(param_selection='random', num_samples=4, add_trajectories=True)
     # plt.show()
 
-    params = [10, 28, 8/3]
-    param_ranges = np.array([params]).T @ np.array([[0.5, 1.5]])
-    param_ranges = param_ranges.tolist()
-    min_dims = [-30, -30, 0]
-    max_dims = [30, 30, 60]
-    poly_order = 2
-    sf = SystemFamily(data_name='lorenz', param_ranges=param_ranges, data_dir=None, device='cpu', poly_order=poly_order)
-    sf.plot_vector_fields(param_selection='random', num_samples=4, add_trajectories=True)
-    plt.show()
+    # params = [10, 28, 8/3]
+    # param_ranges = np.array([params]).T @ np.array([[0.5, 1.5]])
+    # param_ranges = param_ranges.tolist()
+    # min_dims = [-30, -30, 0]
+    # max_dims = [30, 30, 60]
+    # poly_order = 2
+    # sf = SystemFamily(data_name='lorenz', param_ranges=param_ranges, data_dir=None, device='cpu', poly_order=poly_order)
+    # sf.plot_vector_fields(sampler_type='random', num_samples=4, add_trajectories=True)
+    # plt.show()
 
+    poly_order = 3
+    dim = 2
+    nparams = library_size(dim, poly_order=poly_order) * 2
+    sf = SystemFamily(data_name='polynomial', param_ranges=[[-2, 2]] * nparams, device='cpu', poly_order=poly_order)
+    
+    sf.plot_noised_vector_fields(num_samples=2, noise_type='gaussian', noise_level=1, )
 
