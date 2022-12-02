@@ -138,8 +138,8 @@ class FlowSystemODE(torch.nn.Module):
             if i not in which_dims:
                 idx[i] = slice_lattice[i]
                 slice_dict[i] = coords[(slice_lattice[i],) * dim][..., i]
-
         idx = tuple(idx)
+        
         coords = coords[idx][..., which_dims]
         vectors = vectors[idx][..., which_dims]
 
@@ -157,12 +157,12 @@ class FlowSystemODE(torch.nn.Module):
         mesh = torch.meshgrid(*coords, indexing=indexing)
         return torch.cat([ms[..., None] for ms in mesh], axis=-1)
 
-    def plot_trajectory(self, ax=None, which_dims=[0,1], slice_lattice=None, density=1.0, title=''):
+    def plot_trajectory(self, ax=None, which_dims=[0,1], slice_lattice=None, density=1.0, coords=None, vectors=None, title=''):
         """
         Plot multiple trajectories
         """
         xdim, ydim = which_dims
-        coords, vectors, slice_dict = self.get_vector_field(which_dims=which_dims, slice_lattice=slice_lattice, return_slice_dict=True)
+        coords, vectors, slice_dict = self.get_vector_field(which_dims=which_dims, slice_lattice=slice_lattice, coords=coords, vectors=vectors, return_slice_dict=True)
         X = coords[..., xdim]
         Y = coords[..., ydim]
         U = vectors[..., xdim]
@@ -1118,13 +1118,16 @@ class Polynomial(FlowSystemODE):
     recommended_param_ranges = 20 * [[-3., 3.]]
     recommended_param_groups = [recommended_param_ranges]
  
-    def __init__(self, params=None, labels=['x', 'y'], min_dims=[-1.0,-1.0], max_dims=[1.0,1.0], poly_order=3, include_sine=False, include_exp=False, **kwargs):
+    def __init__(self, params=None, labels=None, min_dims=None, max_dims=None, poly_order=3, include_sine=False, include_exp=False, **kwargs):
         """
         Initialize the polynomial system.
         :param params: correspond to library terms for dim1 concatenated with library terms for dim2 ()
         :param poly_order: the order of the polynomial system
         """
-        super().__init__(params, labels, min_dims=min_dims, max_dims=max_dims, **kwargs)
+        labels = ['x', 'y'] if labels is None else labels
+        min_dims = [-1.0,-1.0] if min_dims is None else min_dims
+        max_dims = [1.0,1.0] if max_dims is None else max_dims
+        super().__init__(params=params, labels=labels, min_dims=min_dims, max_dims=max_dims, **kwargs)
 
         self.poly_order = int(poly_order)
         self.include_sine = include_sine
@@ -1220,7 +1223,7 @@ if __name__ == '__main__':
     params = [2]
     min_dims = [-2.,-2.]
     max_dims = [2.,2.]
-    num_lattice = 5
+    num_lattice = 20 #5
     kwargs = {'device': 'cpu', 'params': params, 'min_dims': min_dims, 'max_dims': max_dims, 'num_lattice': num_lattice}
     DE = SaddleNode(**kwargs)
     # DE.plot_vector_field()
@@ -1260,21 +1263,21 @@ if __name__ == '__main__':
     # max_dims = [30,30,60]
     # kwargs = {'device': 'cpu', 'params': params, 'min_dims': min_dims, 'max_dims': max_dims, 'num_lattice': 10}
     # DE = Lorenz(**kwargs)
-    coords1, vectors1 = DE.get_vector_field_from_trajectories(n_trajs=200, T=10, alpha=0.01)
+    coords1, vectors1 = DE.get_vector_field_from_trajectories(n_trajs=100, T=5, alpha=0.01)
     coords2, vectors2 = DE.get_vector_field()
 
     fig,ax = plt.subplots(1,2,figsize=(10,5))
     DE.plot_vector_field(ax=ax[0], coords=coords1, vectors=vectors1)
-    DE.plot_vector_field(ax=ax[1], coords=coords2, vectors=vectors2)
+    DE.plot_vector_field(ax=ax[0], coords=coords2, vectors=vectors2)
     plt.show()
 
-    fig,ax = plt.subplots(1,2,figsize=(10,5))
-    ax[0].hist(vectors2[:,:,0].flatten())
-    ax[0].hist(vectors1[:,:,0].flatten())
+    # fig,ax = plt.subplots(1,2,figsize=(10,5))
+    # ax[0].hist(vectors2[:,:,0].flatten())
+    # ax[0].hist(vectors1[:,:,0].flatten())
 
-    ax[1].hist(vectors2[:,:,1].flatten())
-    ax[1].hist(vectors1[:,:,1].flatten())
-    plt.show()
+    # ax[1].hist(vectors2[:,:,1].flatten())
+    # ax[1].hist(vectors1[:,:,1].flatten())
+    # plt.show()
     
     # computing difference between vector fields
     # a = np.linalg.norm(vectors1 - vectors2, axis=-1)

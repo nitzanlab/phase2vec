@@ -91,13 +91,14 @@ class SystemFamily():
         elif sampler_type == 'control':
             sampler = SystemFamily.params_control
         else:
+            print(sampler_type)
             raise ValueError('Param sampler not recognized.')
 
         return sampler
 
 
 
-    def __init__(self, data_name, device=None, min_dims=None, max_dims=None, num_lattice=64, 
+    def __init__(self, data_name, device=None, min_dims=None, max_dims=None, num_lattice=None, labels=None, 
                 param_ranges=None, param_groups=None, seed=0, **kwargs):
         """
         Generate a system family
@@ -128,7 +129,7 @@ class SystemFamily():
         # general DE params
         self.device = device
         params = self.params_random(1)
-        DE_ex = DE(params=params[0], device=device, min_dims=self.min_dims, max_dims=self.max_dims, num_lattice=num_lattice, **kwargs)
+        DE_ex = DE(params=params[0], device=device, min_dims=self.min_dims, max_dims=self.max_dims, num_lattice=num_lattice, labels=labels, **kwargs)
         data_info = DE_ex.get_info()
         # data_info = {**self.__dict__, **data_info} # merge dictionaries
         self.data_info = data_info
@@ -214,15 +215,17 @@ class SystemFamily():
         """
         Add gaussian noise to flow
         """
-        noise = np.random.randn(flow.shape) * noise_level
+        noise = np.random.normal(scale=noise_level, size=flow.shape)
         return flow + noise
 
-    def noise_flow_mask(self, flow, noise_level):
+    def noise_flow_mask(self, flow, noise_level, empty_val=np.nan):
         """
         Add mask noise to flow
         """
-        mask = np.random.randn(flow.shape) < noise_level
-        return flow * mask
+        flow = flow.copy()
+        mask = np.random.uniform(size=np.array(flow.shape)[:-1]) < noise_level
+        flow[mask, :] = empty_val #
+        return flow
 
     def noise_flow(self, flow, noise_type, noise_level):
         """
@@ -237,19 +240,13 @@ class SystemFamily():
 
 ######################################## Params noise functions ########################################################
 
-    def noise_params_gaussian(self, params, noise_level):
-        """
-        Add gaussian noise to parameters
-        """
-        noise = torch.randn_like(params) * noise_level
-        return params + noise
-
+    
     def noise_params(self, params, noise_type, noise_level):
         """
         Add noise to parameters
         """
         if noise_type == 'params_gaussian':
-            return self.noise_params_gaussian(params, noise_level)
+            return self.noise_flow_gaussian(params, noise_level)
         else:
             return params
 
@@ -267,27 +264,34 @@ class SystemFamily():
         
         vectors = []
         vectors_pert = []
+        DEs = []
+        DEs_pert = []
 
         for p, p_pert in zip(params, params_pert):
 
             DE = self.DE(params=p, **self.data_info)
-            _, v = DE.get_vector_field()
+            coords, v = DE.get_vector_field()
             
             DE_pert = self.DE(params=p_pert, **self.data_info)
             if noise_type == 'trajectory':
-                _, v_pert = DE_pert.get_vector_field_from_trajectory()
+                print('Works well in odes but not here, check!') # TODO: fix this
+                _, v_pert = DE_pert.get_vector_field_from_trajectories(n_trajs=noise_level, T=5, alpha=0.01)
+                # plt.quiver(coords[...,0], coords[...,1], v[...,0], v[...,1])
+                # plt.quiver(coords[...,0], coords[...,1], v_pert[...,0], v_pert[...,1], color='r')
             else:
                 _, v_pert = DE_pert.get_vector_field()
             
             vectors.append(v)
             vectors_pert.append(v_pert)
+            DEs.append(DE)
+            DEs_pert.append(DE_pert)
 
         vectors = np.stack(vectors)
         vectors_pert  = np.stack(vectors_pert)
 
-        _, vectors_pert = self.noise_flow(vectors_pert, noise_type, noise_level=noise_level)
+        vectors_pert = self.noise_flow(vectors_pert, noise_type, noise_level=noise_level)
 
-        return params_pert, vectors_pert, params, vectors
+        return params_pert, vectors_pert, params, vectors, DEs, DEs_pert
 
 
     # def make_data(self, test_size, train_size, sampler_type='uniform', noise_type=None, **kwargs):
@@ -327,17 +331,22 @@ class SystemFamily():
 
 ######################################## Plotting ########################################################
 
-    def plot_noised_vector_fields(self, num_samples, noise_type, noise_level, params=None, **kwargs):
+    def plot_noised_vector_fields(self, num_samples, noise_type, noise_level, params=None, add_trajectories=False, title='', **kwargs):
         """
         Plot original and perturbed vector fields
         """
-        params_pert, flow_pert, params, flow = self.generate_flows(num_samples=num_samples, params=params, noise_type=noise_type, noise_level=noise_level, **kwargs)
+        _, flow_pert, _, flow, DEs, DEs_pert = self.generate_flows(num_samples=num_samples, params=params, noise_type=noise_type, noise_level=noise_level, **kwargs)
         # self.plot_vector_fields(params_pert, flow_pert, params, flow, **kwargs)
-        fig, axs = plt.subplots(num_samples,2, figsize=(10,5))
-        for i, (f, f_pert) in enumerate(zip(flow, flow_pert)):
-            self.plot_vector_field(f, ax=axs[i, 0])
-            self.plot_vector_field(f_pert, ax=axs[i, 1])
-
+        nrows = num_samples
+        ncols = 2 + (add_trajectories * 2)
+        fig, axs = plt.subplots(nrows, ncols, figsize=(10,5), tight_layout=False, constrained_layout=True)
+        for i, (f, f_pert, DE, DE_pert) in enumerate(zip(flow, flow_pert, DEs, DEs_pert)):
+            DE.plot_vector_field(vectors=f, ax=axs[i, 0])
+            DE_pert.plot_vector_field(vectors=f_pert, ax=axs[i, 1 + add_trajectories])
+            if add_trajectories:
+                DE.plot_trajectory(vectors=f, ax=axs[i, 1])
+                DE_pert.plot_trajectory(vectors=f_pert, ax=axs[i, 3])
+        plt.suptitle(title)
         plt.show()
     
     def plot_vector_fields(self, params=None, sampler_type='uniform', add_trajectories=False, **kwargs):
@@ -391,10 +400,23 @@ if __name__ == '__main__':
     # sf.plot_vector_fields(sampler_type='random', num_samples=4, add_trajectories=True)
     # plt.show()
 
-    poly_order = 3
-    dim = 2
-    nparams = library_size(dim, poly_order=poly_order) * 2
-    sf = SystemFamily(data_name='polynomial', param_ranges=[[-2, 2]] * nparams, device='cpu', poly_order=poly_order)
-    
-    sf.plot_noised_vector_fields(num_samples=2, noise_type='gaussian', noise_level=1, )
+    # poly_order = 3
+    # dim = 2
+    # nparams = library_size(dim, poly_order=poly_order) * 2
+    # sf = SystemFamily(data_name='polynomial', param_ranges=[[-2, 2]] * nparams, device='cpu', poly_order=poly_order, num_lattice=20)
 
+    
+    dim = 2
+    nparams = 1
+    sf = SystemFamily(data_name='saddle_node', param_ranges=[[-2, 2]] * nparams, device='cpu', num_lattice=20, min_dims = [-2, -2], max_dims = [2, 2])
+
+
+    noise_types_levels = {
+                        'mask':0.1, 
+                        'gaussian':0.1, 
+                        # 'params_gaussian':0.1, 
+                        # 'trajectory': 200
+                        }
+    # for noise_type, noise_level in noise_types_levels.items():
+    #     sf.plot_noised_vector_fields(num_samples=2, noise_type=noise_type, noise_level=noise_level, add_trajectories=False, title=noise_type)
+    

@@ -45,19 +45,19 @@ def cli():
 help="Generates a data set of vector fields.")
 @click.option('--data-dir', '-f', type=str)
 @click.option('--data-name', '-d', type=str, default='dataset')
-@click.option('--num-samples', '-m', type=int, default=1000)
-@click.option('--sampler', '-sp', type=str, multiple=True, default=['uniform'])
-@click.option('--num-lattice', '-n', type=int, default=64)
-@click.option('--min-dims', '-mi', type=list, default=[-1.,-1.])
-@click.option('--max-dims', '-ma', type=list, default=[1.,1.])
+@click.option('--train-size', '-m', type=int, default=500)
+@click.option('--test-size', '-m', type=int, default=500)
+@click.option('--sampler-type', '-sp', type=str, default='uniform')
+@click.option('--num-lattice', '-n', type=int, default=64) # 
+@click.option('--min-dims', '-mi', type=list) # , default=[-1.,-1.]
+@click.option('--max-dims', '-mn', type=list) # , default=[1.,1.]
+@click.option('--labels', '-mx', type=list) # , default=['x','y']
+@click.option('--param-ranges', '-pr', type=list)
 @click.option('--noise-type', '-nt', type=click.Choice([None, 'gaussian', 'masking', 'parameter', 'trajectory']), default=None)
 @click.option('--noise-mag', '-n', type=float, default=0.0)
-@click.option('--tt', '-t', type=float, default=1.0)
-@click.option('--alpha', '-a', type=float, default=0.01)
 @click.option('--seed', '-se', type=int, default=0)
-@click.option('--holdout-forms-path', '-h', type=click.Path(), default=None)
 @click.option('--config-file', type=click.Path())
-def generate_dataset(data_dir, data_name, system_names, num_samples, sampler, num_lattice, min_dims, max_dims, noise_type, noise_mag, tt, alpha, seed, holdout_forms_path, config_file):
+def generate_dataset(data_dir, data_name, train_size, test_size, sampler_type, num_lattice, min_dims, max_dims, labels, param_ranges, noise_type, noise_mag, seed, config_file):
     """
     Generates train and test data for one data set
 
@@ -66,7 +66,7 @@ def generate_dataset(data_dir, data_name, system_names, num_samples, sampler, nu
     data_name (str): name of data set and folder to save all data in.
     system_names (list of str): names of data to generate
     num_samples (int): number of total samples to generate
-    sampler (list of strings): for each system, a string denoting the type of sampler used. 
+    sampler_type (list of strings): for each system, a string denoting the type of sampler_type used. 
     system_props (list of floats): for each system, a float controlling proportion of total data this system will comprise.
     val_size (float): proportion in (0,1) of data allocated to validation set
     num_lattice (int): number of points for all dimensions in the equally spaced grid on which velocity is measured
@@ -84,101 +84,55 @@ def generate_dataset(data_dir, data_name, system_names, num_samples, sampler, nu
     save_dir = os.path.join(data_dir, data_name)
     ensure_dir(save_dir)
 
-    all_data   = []
-    all_labels = []
-    all_pars   = []
+    # read config file
+    # data_info = {}
+    # if config_file is not None:
+    #     data_info = read_yaml(config_file)
+    # param_ranges = strtuple_to_list(param_ranges)
+    param_ranges = param_ranges if param_ranges is None else [str_to_list(x) for x in param_ranges] #TODO: better handle!
+    sf = SystemFamily(data_name=data_name, num_lattice=num_lattice, min_dims=min_dims, max_dims=max_dims, labels=labels, param_ranges=param_ranges, seed=seed)
+    
+    num_samples = train_size + test_size
+    res = sf.generate_flows(num_samples=num_samples, 
+                                                  noise_type=noise_type, 
+                                                  noise_level=noise_mag,
+                                                  sampler_type=sampler_type)
+    params_pert = res[0] 
+    vectors_pert = res[1]
+    savenames = ['X', 'p']
 
-    sfs = [SystemFamily(data_name=system_name, default_sampler=sampler, num_lattice=num_lattice, min_dims=min_dims, max_dims=max_dims, seed=seed) for (system_name, sampler) in zip(system_names, sampler)]
-    num_labels_per_group = [len(sf.param_groups) for sf in sfs]
-    cum_labels_per_group = [0] + list(np.cumsum(num_labels_per_group))[:-1]
+    if (test_size > 0) and (train_size > 0):
+        split = train_test_split(vectors_pert, params_pert, test_size=test_size, train_size=train_size, random_state=seed)
+    else:
+        split = [vectors_pert, params_pert]
+    
+    tt = ['train'] * (train_size > 0) + ['test'] * (test_size > 0)
+    filenames = [f'{s}_{t}' for s in savenames for t in tt]
 
-    L = sfs[0].L
-    dim = len(min_dims)
-    library, library_terms = sindy_library(L.reshape(num_lattice**dim, dim), poly_order=3)
-
-    # # Holdout-forms
-    # if holdout_forms_path is not None:
-    #     holdout_forms = np.load(holdout_forms_path)
-
-    # # For each system
-    # for d, system_name in enumerate(system_names):
-
-    #     print(f'Generating {system_name} data.')
-
-    #     sampler       = samplers[d]
-    #     sf            = sfs[d]
-    #     num_classes   = sf.num_classes
-
-    #     system_samples = int(system_props[d] * num_samples)
-    #     class_samples  = int(system_samples / float(num_classes))
-
-    #     noise_diffs = []
-
-    #     # For each class in the system
-    #     for c in range(num_classes):
-    #         current_exemplars = 0
-    #         # Until you have the right number of exemplars from this class
-    #         while current_exemplars < class_samples:
-    #             bad_form = True
-    #             while bad_form:
-    #                 gen_par = sf.param_sampler(1)[0]
-    #                 system  = sf.generate_model(gen_par)
-    #                 if system.label != c:
-    #                     # If wrong label, get another sample
-    #                     continue
-    #                 else:
-    #                     current_exemplars += 1
-    #                     datum     = system.forward(0,sf.L)
-
-    #                     # Label relative to the total collection of systems
-    #                     label     = system.label + cum_labels_per_group[d]
-    #                     #print(label)
-
-    #                     # If system doesn't have a closed from in the dictionary, approximate its coefficients with least squares
-    #                     if system_name in ['simple_oscillator', 'alon', 'conservative', 'incompressible']:
-    #                         dx, dy = system.fit_polynomial_representation(poly_order=3)
-    #                     else:
-    #                         dx, dy = system.get_polynomial_representation()
-
-    #                     save_pars = torch.cat((torch.tensor(dx.to_numpy()), torch.tensor(dy.to_numpy()))).transpose(1,0).float()
-                        
-    #                     # Add noise
-    #                     if noise_type == 'gaussian':
-    #                         datum_std = datum.std()
-    #                         datum += (datum_std * noise_mag) * torch.randn_like(datum)
-    #                     elif noise_type == 'masking':
-    #                         datum *= 1.*(torch.rand_like(datum) > noise_mag)
-    #                     elif noise_type == 'parameter':
-    #                         save_pars += noise_mag * torch.randn_like(save_pars)
-    #                         datum = torch.einsum('sl,ld->sd', library, save_pars).reshape(*datum.shape)
-    #                     elif noise_type == 'trajectory':
-
-                            
-
-    #                     if holdout_forms_path is not None:
-    #                         # Test for bad form
-    #                         form = (1*(save_pars != 0)).numpy()
-    #                         bad_form = np.any(np.all(form == holdout_forms))
-    #                     else:
-    #                         bad_form = False
-    #                 all_data.append(datum)
-    #                 all_pars.append(save_pars)
-    #                 all_labels.append(label)
-
-    # all_data   = torch.stack(all_data).numpy().transpose(0,3,1,2)
-    # all_pars   = torch.stack(all_pars).numpy()
-    # all_labels = np.array(all_labels)
-
-    # split = train_test_split(all_data, all_labels, all_pars, test_size=val_size, stratify=all_labels, random_state=seed)
-
-    # for dt, nm in zip(split, ['X_train', 'X_test', 'y_train', 'y_test', 'p_train', 'p_test']):
-    #     np.save(os.path.join(save_dir, nm + '.npy'), dt)
+    for dt, nm in zip(split, filenames):
+        np.save(os.path.join(save_dir, nm + '.npy'), dt)
 
     # # Unique forms
     # redundant_forms = 1* (all_pars != 0)
     # unique_forms    = np.unique(redundant_forms, axis=0)
 
     # np.save(os.path.join(save_dir, 'forms.npy'), unique_forms)
+
+
+    save_dir = os.path.join(data_dir, data_name)
+
+    # param_ranges = strtuple_to_list(param_ranges)
+    # param_ranges = param_ranges * times_param_ranges
+    # min_dims = str_to_list(min_dims)
+    # max_dims = str_to_list(max_dims)
+
+    # kwargs = {ctx.args[i][2:].replace('-','_'):ctx.args[i+1] for i in range(0,len(ctx.args),2)}
+    # cf = CircuitFamily(data_name=data_name, param_ranges=param_ranges, device=device, data_dir=save_dir, min_dims=min_dims, max_dims=max_dims, **kwargs)
+    # cf.make_data(num_samples=num_samples)
+    data_config = os.path.join(save_dir, 'data_config.yaml')
+    write_yaml(data_config, sf.data_info)
+    print('Successfully generated data for {}. Config file: {}'.format(data_name, data_config))
+
 
 # @cli.command(name='train', cls=command_with_config('config_file'), help='train a VAE to learn reduced models')
 # @click.argument("data-config", type=click.Path())
@@ -380,12 +334,12 @@ def generate_dataset(data_dir, data_name, system_names, num_samples, sampler, nu
 #     write_yaml(output_file, args)
 #     print(f'Successfully generated net config file at "{output_file}".')
 
-# @cli.command(name="generate-data-config", help="Generates a configuration file that holds editable options for a dataset.")
-# @click.option('--output-file', '-o', type=click.Path(), default='data-config.yaml')
-# def generate_data_config(output_file):
-#     output_file = os.path.abspath(output_file)
-#     write_yaml(output_file, get_command_defaults(generate_dataset))
-#     print(f'Successfully generated data config file at "{output_file}".')
+@cli.command(name="generate-data-config", help="Generates a configuration file that holds editable options for a dataset.")
+@click.option('--output-file', '-o', type=click.Path(), default='data-config.yaml')
+def generate_data_config(output_file):
+    output_file = os.path.abspath(output_file)
+    write_yaml(output_file, get_command_defaults(generate_dataset))
+    print(f'Successfully generated data config file at "{output_file}".')
 
 # @cli.command(name="generate-train-config", help="Generates a configuration file that holds editable options for training parameters.")
 # @click.option('--output-file', '-o', type=click.Path(), default='train-config.yaml')
@@ -393,3 +347,57 @@ def generate_dataset(data_dir, data_name, system_names, num_samples, sampler, nu
 #     output_file = os.path.abspath(output_file)
 #     write_yaml(output_file, get_command_defaults(call_train))
 #     print(f'Successfully generated train config file at "{output_file}".')
+
+if __name__ == '__main__':
+    outdir = '/Users/nomo/PycharmProjects/phase2vec/output' # '../output'
+    data_dir = os.path.join(outdir, 'data', 'nd')
+
+    # testing
+    train_size = test_size = 10
+    data_name = 'polynomial'
+    sampler_type = 'random'
+    # generate_dataset(['--data-dir', data_dir, '--train-size', train_size, '--test-size', test_size, '--data-name', data_name, '--sampler-type', sampler_type])
+
+    dim = 3
+    library_size = 20
+    train_size = 100
+    test_size = 0
+    data_name = 'polynomial'
+    sampler_type = 'random'
+    min_dims = [-30,-30,0]
+    max_dims = [30,30,60]
+    labels = ['x_%d' % i for i in range(dim)]
+    num_lattice = 10
+    # [10,28,8/3]
+    # generate_dataset(['--data-dir', data_dir, 
+    #                   '--train-size', train_size, 
+    #                   '--test-size', test_size, 
+    #                   '--data-name', data_name, 
+    #                   '--sampler-type', sampler_type, 
+    #                   '--min-dims', min_dims,
+    #                   '--max-dims', max_dims,
+    #                   '--labels', labels,
+    #                   '--param-ranges', ['-30.0, 30.0'] * (dim * library_size) ,
+    #                   ])
+                      
+
+    dim = 3
+    train_size = 0
+    test_size = 100
+    data_name = 'lorenz'
+    sampler_type = 'random'
+    fold_mn = 0.5
+    fold_mx = 1.5
+    param_ranges = ['%.02f, %.02f' % (fold_mn * v, fold_mx * v) for v in [10,28,8/3]]
+    generate_dataset(['--data-dir', data_dir, 
+                      '--train-size', train_size, 
+                      '--test-size', test_size, 
+                      '--data-name', data_name, 
+                      '--sampler-type', sampler_type, 
+                      '--min-dims', min_dims,
+                      '--max-dims', max_dims,
+                      '--labels', labels,
+                      '--param-ranges', param_ranges,
+                      ])
+
+                      
