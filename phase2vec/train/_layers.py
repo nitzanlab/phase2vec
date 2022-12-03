@@ -354,3 +354,61 @@ class MLP(nn.Module):
     def forward(self,x):
         return self.layers(x)
 
+class CNN_nd(nn.Module):
+    def __init__(self, in_shape, num_conv_layers,
+            kernel_sizes, kernel_features,
+            pooling_sizes = [],
+            strides = [1],
+            batch_norm=False,
+            activation_type='relu'):
+
+        super(CNN_nd, self).__init__()
+
+        if activation_type == 'relu':
+            activation = torch.nn.ReLU()
+        elif activation_type == 'softplus':
+            activation = torch.nn.Softplus()
+        elif activation_type == 'tanh':
+            activation = torch.nn.Tanh()
+        elif activation_type == None:
+            activation = None
+        else:
+            raise ValueError('Activation type not recognized!')
+
+        dim = in_shape[0]
+        conv_layers = []
+
+        for l in range(num_conv_layers):
+            in_channels = in_shape[0] if l==0 else kernel_features[l-1]
+            conv_layers.append(convNd(in_channels, kernel_features[l], dim, kernel_sizes[l], strides[l], 0))
+            if batch_norm:
+                if dim == 1:
+                    conv_layers.append(torch.nn.BatchNorm(kernel_features[l]))
+                elif dim == 2:
+                   conv_layers.append(torch.nn.BatchNorm2d(kernel_features[l]))
+                elif dim == 3:
+                    conv_layers.append(torch.nn.BatchNorm3d(kernel_features[l]))
+                else:
+                    raise ValueError('Batch norm is only available in the 1, 2 and 3 dimensional cases.')
+            if activation != None:
+               conv_layers.append(activation)
+            if len(pooling_sizes) >= l +1:
+                if dim == 1:
+                    conv_layers.append(torch.nn.MaxPool1d(pooling_sizes[l]))
+                elif dim == 2:
+                    conv_layers.append(torch.nn.MaxPool2d(pooling_sizes[l]))
+                elif dim == 3:
+                    conv_layers.append(torch.nn.MaxPool3d(pooling_sizes[l]))
+                else:
+                    raise ValueError('Pooling is only available in the 1, 2 and 3 dimensional cases.')
+
+        self.conv_layers = torch.nn.Sequential(*conv_layers)
+
+        with torch.no_grad():
+            x = torch.rand(1, *in_shape)
+            y = self.conv_layers(x)
+            self.out_shape = y.shape[1:]
+            self.out_size = torch.prod(torch.tensor(y.shape))
+
+    def forward(self, x):
+        return self.conv_layers(x)

@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-from ._layers import convNd, MLP, CNN, dCNN
+from ._layers import convNd, MLP, CNN, dCNN, CNN_nd
 from phase2vec.data import sindy_library
 
 def load_model(model_type, pretrained_path=None, device='cpu', **kwargs):
@@ -87,19 +87,20 @@ class CNNwFC_exp_emb(nn.Module):
             num_fc_hid_layers=0, fc_hid_dims=[],
             min_dims=[-1.,-1.],
             max_dims=[1.,1.],
-            batch_norm=False, dropout=False, dropout_rate=.5, activation_type='relu', last_pad=None):
+            batch_norm=False, activation_type='relu'):
 
         super(CNNwFC_exp_emb, self).__init__()
 
         self.dim         = in_shape[0]
         self.num_lattice = in_shape[1]
         self.latent_dim = latent_dim
-        self.enc = CNN(in_shape, num_conv_layers=num_conv_layers,
-                        kernel_sizes=kernel_sizes, kernel_features=kernel_features,
-                        pooling_sizes = pooling_sizes,
-                        strides = strides,
-                        batch_norm=batch_norm, dropout=dropout, dropout_rate=dropout_rate,
-                        activation_type=activation_type)
+        encoder_model = CNN if self.dim == 0 else CNN_nd
+        self.enc = encoder_mondel(in_shape, num_conv_layers=num_conv_layers,
+                                  kernel_sizes=kernel_sizes, kernel_features=kernel_features,
+                                  pooling_sizes = pooling_sizes,
+                                  strides = strides,
+                                  batch_norm=batch_norm, dropout=dropout, dropout_rate=dropout_rate,
+                                  activation_type=activation_type)
 
         with torch.no_grad():
             x = torch.rand(1, *in_shape)
