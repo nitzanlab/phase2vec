@@ -61,10 +61,10 @@ class FlowSystemODE(torch.nn.Module):
         self.params = torch.tensor(self.params) if not isinstance(self.params, torch.Tensor) else self.params
         self.params = self.params.float()
         self.labels = labels
-        self.dim = len(labels)
         self.num_lattice = num_lattice
         self.min_dims = min_dims #if min_dims is not None else [-2, ] * self.dim
         self.max_dims = max_dims #if max_dims is not None else [2, ] * self.dim
+        self.dim = len(self.min_dims)
         self.device = device
         self.boundary_type = boundary_type
         self.boundary_radius = torch.tensor(boundary_radius).float()
@@ -102,7 +102,6 @@ class FlowSystemODE(torch.nn.Module):
         num_lattice = self.num_lattice if num_lattice is None else num_lattice
 
         return min_dims, max_dims, num_lattice
-
 
     def _plot_trajectory_2d(self, L, fig=None, ax=None, density=1.0, which_dims=[0,1], title=''):
         """
@@ -142,32 +141,35 @@ class FlowSystemODE(torch.nn.Module):
         ax.set_title(title,fontsize=8)
 
 
-    def _plot_trajectory_3d(self, T, alpha, L, min_dims=None, max_dims=None, ax=None, which_dims=[0,1,2], title=''):
+    def _plot_trajectory_3d(self, T, alpha, L, min_dims=None, max_dims=None, ax=None, inits=None,which_dims=[0,1,2], n_trajs=5, title=''):
         """
         Plots trajectory over a 3d grid
         """
-        min_dims, max_dims, _ = self.get_lattice_params(min_dims, max_dims)
+        d = len(which_dims)
+        if self.dim < d:
+            raise ValueError('System must be at least 3d')
 
-        lx, ly, lz = L.shape[:3] # TODO: which dims
-        fig = plt.figure()
-        ax = plt.axes(projection='3d')
-        for x in range(lx):
-            for y in range(ly):
-                for z in range(lz):
-                    ic = L[x, y, z]
-                    trajectory = self.run(T, alpha=alpha, init=ic).detach().cpu().numpy()
-                    p = ax.plot(trajectory[..., 0], trajectory[..., 1], trajectory[..., 2], linewidth=1, alpha=.5,
-                                color='blue')
-                    ax.scatter(trajectory[-1, 0], trajectory[-1, 1],  trajectory[-1, 2], c='red', marker='x', s=64)
+        min_dims = self.min_dims if min_dims == None else min_dims
+        max_dims = self.max_dims if max_dims == None else max_dims
+
+        assert len(which_dims) == d
+        xdim, ydim, zdim = which_dims
+        if inits is None:
+            inits = torch.cat([torch.rand(n_trajs,1)*(max_dims[i] - min_dims[i]) + min_dims[i] for i in range(self.dim)], dim=1)
+        trajectories = self.run(T, alpha, init=inits).movedim(0,1)
+        if ax is None:
+            fig = plt.figure()
+            ax = plt.axes(projection='3d')
+        for trajectory in trajectories:
+            p = ax.plot(trajectory[..., xdim], trajectory[..., ydim], trajectory[..., zdim], linewidth=1, alpha=.5, color='blue')
+
+        ax.set_xlabel(self.labels[xdim])
+        ax.set_ylabel(self.labels[ydim])
+        ax.set_zlabel(self.labels[zdim])
 
         ax.set_xlim([min_dims[0], max_dims[0]])
         ax.set_ylim([min_dims[1], max_dims[1]])
         ax.set_zlim([min_dims[2], max_dims[2]])
-        ax.set_xlabel(self.labels[0])
-        ax.set_ylabel(self.labels[1])
-        ax.set_zlabel(self.labels[2])
-        ax.set_title(title)
-        plt.show()
 
     def generate_mesh(self, min_dims=None, max_dims=None, num_lattice=None):
         """
@@ -323,6 +325,47 @@ class SaddleNode(FlowSystemODE):
         dx.loc['saddle_node']['$x_0^2$'] = -1
         dy.loc['saddle_node']['$x_1$'] = -1
         return dx, dy
+
+class SaddleNode3d(FlowSystemODE):
+    """
+    Saddle node bifurcation
+        xdot = r + x^2
+        ydot = -y
+        zdot = -z
+    """
+
+    min_dims = [-1.,-1.,-1.]
+    max_dims = [1.,1.,1.]
+
+    recommended_param_ranges=[[-1.,1.]]
+    recommended_param_groups=[[[-1.,0.]], [[0.,1.]]]
+
+    eq_string = r'$\dot{x}_0 = %.02f - x_0^2; \dot{x}_1 = -1; \dot{x}_2 = -1$'
+    short_name = 'sn3d'
+
+    def forward(self, t, q, **kwargs):
+        x = q[..., 0]
+        y = q[..., 1]
+        z = q[..., 2]
+
+        xdot = self.params[0] - x**2 
+        ydot = -y 
+        zdot = -z 
+        qdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1), zdot.unsqueeze(-1)], dim=-1)
+        return qdot
+
+    def get_polynomial_representation(self):
+        dx = pd.DataFrame(0.0, index=['saddle_node'], columns=self.polynomial_terms)
+        dy = pd.DataFrame(0.0, index=['saddle_node'], columns=self.polynomial_terms)
+        dz = pd.DataFrame(0.0, index=['saddle_node'], columns=self.polynomial_terms)
+        params = [p.numpy() for p in self.params]
+        dx.loc['saddle_node']['1'] = params[0]
+        dx.loc['saddle_node']['$x_0^2$'] = -1
+        dy.loc['saddle_node']['$x_1$'] = -1
+        dz.loc['saddle_node']['$x_2$'] = -1
+        return dx, dy, dz
+
+
 
 class Pitchfork(FlowSystemODE):
     """
@@ -816,13 +859,13 @@ class Lorenz(FlowSystemODE):
         zdot = x * y - beta * z
     """
     labels = ['u', 'v', 'w']
-    n_params = dim = 3
-    params = torch.tensor([0] * dim)
+    n_params = 3
+    params = torch.zeros(n_params)
+    min_dims = [-1.,-1.,-1.]
+    max_dims = [1., 1., 1.]
 
-    min_dims = [-10.0, -20.0, -5.0]
-    max_dims = [20.0, 20.0, 40.0]
-
-    recommended_param_ranges = [[0, 1]] * n_params
+    recommended_param_ranges  = [[9,11],[14,28],[2,4]]
+    recommended_param_groups = [recommended_param_ranges]
 
     def __init__(self, params=params, labels=labels, min_dims=min_dims, max_dims=max_dims, **kwargs):
         super().__init__(params, labels, min_dims=min_dims, max_dims=max_dims, **kwargs)
@@ -831,20 +874,46 @@ class Lorenz(FlowSystemODE):
         x = q[..., 0]
         y = q[..., 1]
         z = q[..., 2]
- 
+
+        x = 15*(x + 1) - 10 # = 15x + 5
+        y = 20*y 
+        z = 22.5*(z + 1) - 5 # = 22.5z + 17.5
+
+
         sigma = self.params[0]
         rho   = self.params[1]
         beta  = self.params[2]
 
-        xdot = sigma * (y - x)
-        ydot = x * (rho - z) - y
-        zdot = x * y - beta * z
+        xdot = sigma * (y - x) # sigma * (20y - (15x + 5)) = sigma * (20y - 15x - 5) = 20*sigma*y - 15*sigma*x - 5*sigma
+        ydot = x * (rho - z) - y # rho*x - x*z - y = rho*(15x + 5) - (15x+5)*(22.5z + 17.5)- 20y
+        zdot = x * y - beta * z # 20*y*(15x + 5) - beta * (22.5z + 17.5) = 20*15*x*y + 20*y*5 - 22.5*beta*z - 17.5*beta 
 
-        qdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1), zdot.unsqueeze(-1)],dim=-1)
-        if self.bounded:
-            return (qdot * torch.sigmoid(self.boundary_gain*(self.bound - torch.norm(q,1,dim=-1,keepdim=True)))).float()
-        else:
-            return qdot.float()
+        qdot = .05*torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1), zdot.unsqueeze(-1)],dim=-1)
+        #import pdb
+        #pdb.set_trace()
+        return qdot.float()
+
+    def get_polynomial_representation(self):
+        dx = pd.DataFrame(0.0, index=['lorenz'], columns=self.polynomial_terms)
+        dy = pd.DataFrame(0.0, index=['lorenz'], columns=self.polynomial_terms)
+        dz = pd.DataFrame(0.0, index=['lorenz'], columns=self.polynomial_terms)
+        params = [p.numpy() for p in self.params]
+        
+        dx.loc['lorenz']['1']   = .05*(-5 * params[0])
+        dx.loc['lorenz']['$x_0$'] = .05*(-15 * params[0])
+        dx.loc['lorenz']['$x_1$'] = .05*(20 * params[0])
+        
+        dy.loc['lorenz']['1']   = .05*(5 * params[1]  - 87.5)
+        dy.loc['lorenz']['$x_0$'] = .05*(15 * params[1] - 262.5)
+        dy.loc['lorenz']['$x_1$'] = .05*(-20)
+        dy.loc['lorenz']['$x_2$'] = .05*(-112.5)
+        dy.loc['lorenz']['$x_0x_2$'] = .05*(-337.5)
+        
+        dz.loc['lorenz']['1'] = .05*(-17.5  * params[2])
+        dz.loc['lorenz']['$x_1$'] = .05*(100)
+        dz.loc['lorenz']['$x_0x_1$'] = .05*(300)
+        dz.loc['lorenz']['$x_2$'] = .05*(-22.5 * params[2])
+        return dx, dy, dz
 
 class Linear(FlowSystemODE):
 
@@ -938,13 +1007,14 @@ class Polynomial(FlowSystemODE):
         xdot = 
         ydot = -y
     """
+
     min_dims = [-1.,-1.]
     max_dims = [1., 1.]
     
-    recommended_param_ranges = 20*[[-3., 3.]]
+    recommended_param_ranges = 60*[[-3., 3.]]
     recommended_param_groups = [recommended_param_ranges]
  
-    def __init__(self, params=None, labels=['x', 'y'], min_dims=[-1.0,-1.0], max_dims=[1.0,1.0], poly_order=3, include_sine=False, include_exp=False, **kwargs):
+    def __init__(self, params=None, labels=['x', 'y', 'z'], min_dims=[-1.0, -1.0], max_dims=[1.0, 1.0], poly_order=3, include_sine=False, include_exp=False, **kwargs):
         """
         Initialize the polynomial system.
         :param params: correspond to library terms for dim1 concatenated with library terms for dim2 ()
@@ -963,12 +1033,8 @@ class Polynomial(FlowSystemODE):
         params = self.params.reshape(-1, self.dim)
         z_shape = z.shape
         z = z.reshape(-1,self.dim)
-        library, _ = sindy_library(z, self.poly_order,
-                                   include_sine=False, include_exp=False)
-        
-        zdot = torch.einsum('sl,ld->sd', library.to(params.device).float(), params.float())
-        zdot = zdot.reshape(*z_shape)
-    
+        library, _ = sindy_library(z, self.poly_order, include_sine=False, include_exp=False)
+        zdot = torch.einsum('sl,ld->sd', library.to(params.device).float(), params.float()).reshape(*z_shape)
         return zdot
 
     def params_str(self, s=''):
@@ -998,13 +1064,14 @@ class Polynomial(FlowSystemODE):
 
     def get_polynomial_representation(self):
         nterms = len(self.library_terms)
-        dx = pd.DataFrame(0.0, index=['polynomial'], columns=self.library_terms) # should we keep these terms or set according to poly_order?
-        dy = pd.DataFrame(0.0, index=['polynomial'], columns=self.library_terms)
-        params = [p.numpy() for p in self.params]
-        for ilb,lb in enumerate(self.library_terms):
-            dx[lb] = params[ilb]
-            dy[lb] = params[ilb + nterms]
-        return dx, dy
+        dX = []
+        params = self.params.reshape(-1,self.dim)
+        for d in range(self.dim):
+            dx = pd.DataFrame(0.0, index=['polynomial'], columns=self.library_terms) # should we keep these terms or set according to poly_order?
+            for ilb,lb in enumerate(self.library_terms):
+                dx[lb] = params[ilb,d].numpy()
+            dX.append(dx)
+        return dX
 
 class NeuralODE(FlowSystemODE):
     params = {}

@@ -5,7 +5,7 @@ import torch.nn as nn
 from typing import Tuple, Callable
 
 class convNd(nn.Module):
-    """Some Information about convNd"""
+    """Taken from https://github.com/pvjosue/pytorch_convNd"""
 
     def __init__(self, in_channels: int,
                  out_channels: int,
