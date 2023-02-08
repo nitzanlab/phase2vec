@@ -41,7 +41,10 @@ setup(
         'urllib3>=1.26.12',
         'Werkzeug>=2.2.2',
         'yarl>=1.8.1',
-        'zipp>=3.9.0'
+        'zipp>=3.9.0',
+        'decorator>=4.3.0',
+        'jupyterlab',
+        'notebook'
     ],
     entry_points={'console_scripts': ['phase2vec = phase2vec.cli:cli']}
 )
