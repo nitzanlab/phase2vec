@@ -40,7 +40,7 @@ class FlowSystemODE(torch.nn.Module):
     eq_string = None
 
     def __init__(self, params=params, labels=labels, adjoint=False, solver_method='euler', train=False, device='cuda',
-                 num_lattice=64, min_dims=min_dims, max_dims=max_dims, boundary_type=None, boundary_radius=1e1, boundary_gain=1.0,time_direction=1, **kwargs):
+                 num_lattice=64, min_dims=min_dims, max_dims=max_dims, boundary_type=None, boundary_radius=1e1, boundary_gain=1.0,time_direction=1, poly_order=3, **kwargs):
         """
         Initialize ODE. Defaults to a 2-dimensional system with a single parameter
 
@@ -71,7 +71,7 @@ class FlowSystemODE(torch.nn.Module):
         self.boundary_gain = torch.tensor(boundary_gain).float()
         self.boundary_box = [min_dims, max_dims]
         self.time_direction = time_direction
-        self.poly_order = 3
+        self.poly_order = poly_order
         self.polynomial_terms = sindy_library(torch.ones((1, self.dim)), poly_order=self.poly_order, include_sine=False, include_exp=False)[1]
 
 
