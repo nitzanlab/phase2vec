@@ -105,8 +105,9 @@ class SystemFamily():
         self.max_dims = DE.max_dims if max_dims is None else max_dims
         self.dim = len(self.min_dims)
 
+        self.poly_order = 3
         if self.data_name == 'polynomial':
-            self.param_ranges = self.dim*library_size(self.dim, kwargs['poly_order']) * [[-3.,3.]] if param_ranges is None else param_ranges
+            self.param_ranges = self.dim*library_size(self.dim, self.poly_order) * [[-3.,3.]] if param_ranges is None else param_ranges
             self.param_groups = [self.param_ranges] if param_groups is None else param_groups
         else:
             self.param_ranges = DE.recommended_param_ranges if param_ranges is None else param_ranges

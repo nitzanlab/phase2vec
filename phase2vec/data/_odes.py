@@ -71,7 +71,8 @@ class FlowSystemODE(torch.nn.Module):
         self.boundary_gain = torch.tensor(boundary_gain).float()
         self.boundary_box = [min_dims, max_dims]
         self.time_direction = time_direction
-        self.polynomial_terms = sindy_library(torch.ones((1, self.dim)), poly_order=3, include_sine=False, include_exp=False)[1]
+        self.poly_order = 3
+        self.polynomial_terms = sindy_library(torch.ones((1, self.dim)), poly_order=self.poly_order, include_sine=False, include_exp=False)[1]
 
 
     def run(self, T, alpha, init=None,clip=True):
