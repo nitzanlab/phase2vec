@@ -5,7 +5,7 @@ import torch.nn as nn
 from typing import Tuple, Callable
 
 class convNd(nn.Module):
-    """Some Information about convNd"""
+    """Taken from https://github.com/pvjosue/pytorch_convNd"""
 
     def __init__(self, in_channels: int,
                  out_channels: int,
@@ -195,7 +195,7 @@ class convNd(nn.Module):
                 if out_frame < 0 or out_frame >= size_o[0]:
                     continue
 
-                # Prepate input for next dimmension
+                # Prepate input for next dimension
                 conv_input = input.view(b, c_i, size_i[0], -1)
                 conv_input = conv_input[:, :, j, :].view((b, c_i) + size_i[1:])
 
@@ -213,7 +213,7 @@ class convNd(nn.Module):
         if self.use_bias:
             resultShape = result.shape
             result = result.view(b, resultShape[1], -1)
-            for k in range(self.out_Gchannels):
+            for k in range(self.out_channels):
                 result[:, k, :] += self.bias[k]
             return result.view(resultShape)
         else:
@@ -271,7 +271,7 @@ class CNN(nn.Module):
             kernel_sizes=[], kernel_features=[],
             pooling_sizes = [],
             strides = [1],
-            batch_norm=False, dropout=False, dropout_rate=.5,
+            batch_norm=False,
             activation_type='relu'):
 
         super(CNN, self).__init__()
@@ -354,3 +354,61 @@ class MLP(nn.Module):
     def forward(self,x):
         return self.layers(x)
 
+class CNN_nd(nn.Module):
+    def __init__(self, in_shape, num_conv_layers,
+            kernel_sizes, kernel_features,
+            pooling_sizes = [],
+            strides = [1],
+            batch_norm=False,
+            activation_type='relu'):
+
+        super(CNN_nd, self).__init__()
+
+        if activation_type == 'relu':
+            activation = torch.nn.ReLU()
+        elif activation_type == 'softplus':
+            activation = torch.nn.Softplus()
+        elif activation_type == 'tanh':
+            activation = torch.nn.Tanh()
+        elif activation_type == None:
+            activation = None
+        else:
+            raise ValueError('Activation type not recognized!')
+
+        dim = in_shape[0]
+        conv_layers = []
+
+        for l in range(num_conv_layers):
+            in_channels = in_shape[0] if l==0 else kernel_features[l-1]
+            conv_layers.append(convNd(in_channels, kernel_features[l], dim, kernel_sizes[l], strides[l], 0))
+            if batch_norm:
+                if dim == 1:
+                    conv_layers.append(torch.nn.BatchNorm(kernel_features[l]))
+                elif dim == 2:
+                   conv_layers.append(torch.nn.BatchNorm2d(kernel_features[l]))
+                elif dim == 3:
+                    conv_layers.append(torch.nn.BatchNorm3d(kernel_features[l]))
+                else:
+                    raise ValueError('Batch norm is only available in the 1, 2 and 3 dimensional cases.')
+            if activation != None:
+               conv_layers.append(activation)
+            if len(pooling_sizes) >= l +1:
+                if dim == 1:
+                    conv_layers.append(torch.nn.MaxPool1d(pooling_sizes[l]))
+                elif dim == 2:
+                    conv_layers.append(torch.nn.MaxPool2d(pooling_sizes[l]))
+                elif dim == 3:
+                    conv_layers.append(torch.nn.MaxPool3d(pooling_sizes[l]))
+                else:
+                    raise ValueError('Pooling is only available in the 1, 2 and 3 dimensional cases.')
+
+        self.conv_layers = torch.nn.Sequential(*conv_layers)
+
+        with torch.no_grad():
+            x = torch.rand(1, *in_shape)
+            y = self.conv_layers(x)
+            self.out_shape = y.shape[1:]
+            self.out_size = torch.prod(torch.tensor(y.shape))
+
+    def forward(self, x):
+        return self.conv_layers(x)

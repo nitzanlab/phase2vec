@@ -47,16 +47,17 @@ help="Generates a data set of vector fields.")
 @click.option('--system-props', '-c', type=float, multiple=True, default=[1.0])
 @click.option('--val-size', '-t', type=float, default=.25)
 @click.option('--num-lattice', '-n', type=int, default=64)
-@click.option('--min-dims', '-mi', type=list, default=[-1.,-1.])
-@click.option('--max-dims', '-ma', type=list, default=[1.,1.])
+@click.option('--min-dims', '-mi', type=float, multiple=True, default=[-1.0, -1.0])
+@click.option('--max-dims', '-ma', type=float, multiple=True, default=[1.0, 1.0])
 @click.option('--noise-type', '-nt', type=click.Choice([None, 'gaussian', 'masking', 'parameter', 'trajectory']), default=None)
 @click.option('--noise-mag', '-n', type=float, default=0.0)
 @click.option('--tt', '-t', type=float, default=1.0)
 @click.option('--alpha', '-a', type=float, default=0.01)
+@click.option('--poly-order', '-p', type=int, default=3)
 @click.option('--seed', '-se', type=int, default=0)
 @click.option('--holdout-forms-path', '-h', type=click.Path(), default=None)
 @click.option('--config-file', type=click.Path())
-def generate_dataset(data_dir, data_set_name, system_names, num_samples, samplers, system_props, val_size, num_lattice, min_dims, max_dims, noise_type, noise_mag, tt, alpha, seed, holdout_forms_path, config_file):
+def generate_dataset(data_dir, data_set_name, system_names, num_samples, samplers, system_props, val_size, num_lattice, min_dims, max_dims, noise_type, noise_mag, tt, alpha, poly_order, seed, holdout_forms_path, config_file):
     """
     Generates train and test data for one data set
 
@@ -93,13 +94,13 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
     all_labels = []
     all_pars   = []
 
-    sfs = [SystemFamily(data_name=system_name, default_sampler=sampler, num_lattice=num_lattice, min_dims=min_dims, max_dims=max_dims, seed=seed) for (system_name, sampler) in zip(system_names, samplers)]
+    sfs = [SystemFamily(data_name=system_name, default_sampler=sampler, num_lattice=num_lattice, min_dims=min_dims, max_dims=max_dims, poly_order=poly_order, seed=seed) for (system_name, sampler) in zip(system_names, samplers)]
     num_labels_per_group = [len(sf.param_groups) for sf in sfs]
     cum_labels_per_group = [0] + list(np.cumsum(num_labels_per_group))[:-1]
 
     L = sfs[0].L
     dim = len(min_dims)
-    library, library_terms = sindy_library(L.reshape(num_lattice**dim, dim), poly_order=3)
+    library, library_terms = sindy_library(L.reshape(num_lattice**dim, dim), poly_order=poly_order)
 
     # Holdout-forms
     if holdout_forms_path is not None:
@@ -141,11 +142,10 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
 
                         # If system doesn't have a closed from in the dictionary, approximate its coefficients with least squares
                         if system_name in ['simple_oscillator', 'alon', 'conservative', 'incompressible']:
-                            dx, dy = system.fit_polynomial_representation(poly_order=3)
+                            dX = system.fit_polynomial_representation(poly_order=3)
                         else:
-                            dx, dy = system.get_polynomial_representation()
-
-                        save_pars = torch.cat((torch.tensor(dx.to_numpy()), torch.tensor(dy.to_numpy()))).transpose(1,0).float()
+                            dX = system.get_polynomial_representation()
+                        save_pars = torch.cat([torch.tensor(dx.to_numpy()) for dx in dX]).transpose(1,0).float()
                         
                         # Add noise
                         if noise_type == 'gaussian':
@@ -197,7 +197,9 @@ def generate_dataset(data_dir, data_set_name, system_names, num_samples, sampler
                     all_pars.append(save_pars)
                     all_labels.append(label)
 
-    all_data   = torch.stack(all_data).numpy().transpose(0,3,1,2)
+     
+    #all_data   = torch.stack(all_data).numpy().transpose(0,3,1,2)
+    all_data   = torch.stack(all_data).movedim(-1,1).numpy()
     all_pars   = torch.stack(all_pars).numpy()
     all_labels = np.array(all_labels)
 

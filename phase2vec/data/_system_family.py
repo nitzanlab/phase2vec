@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from phase2vec.data._odes import *
+from phase2vec.data._polynomials import library_size
 
 class SystemFamily():
     """
@@ -33,6 +34,9 @@ class SystemFamily():
 
         elif data_name == 'saddle_node':
             generator = SaddleNode
+
+        elif data_name == 'saddle_node_3d':
+            generator = SaddleNode3d
 
         elif data_name == 'pitchfork':
             generator = Pitchfork
@@ -97,10 +101,16 @@ class SystemFamily():
         self.data_dir = os.path.abspath(data_dir) if data_dir is not None else '.'
 
         # if not provided, use ode suggested params
-        self.param_ranges = DE.recommended_param_ranges if param_ranges is None else param_ranges
-        self.param_groups = DE.recommended_param_groups if param_groups is None else param_groups
         self.min_dims = DE.min_dims if min_dims is None else min_dims
         self.max_dims = DE.max_dims if max_dims is None else max_dims
+        self.dim = len(self.min_dims)
+
+        if self.data_name == 'polynomial':
+            self.param_ranges = self.dim*library_size(self.dim, kwargs['poly_order']) * [[-3.,3.]] if param_ranges is None else param_ranges
+            self.param_groups = [self.param_ranges] if param_groups is None else param_groups
+        else:
+            self.param_ranges = DE.recommended_param_ranges if param_ranges is None else param_ranges
+            self.param_groups = DE.recommended_param_groups if param_groups is None else param_groups
 
         # Num classes
         if self.data_name == 'linear':
@@ -118,15 +128,12 @@ class SystemFamily():
         data_info = {**self.__dict__, **data_info} # merge dictionaries
         self.data_info = data_info
         self.num_lattice = num_lattice
-        self.dim = DE_ex.dim
         self.DE = DE
         self.DE_ex = DE_ex
-        if self.data_name != 'grayscott': # TODO: ask isinstance(generator, ODE/PDE)
-            # TODO: can generator.param can be used as default?
-            self.L = self.DE_ex.generate_mesh(num_lattice=num_lattice, min_dims=self.min_dims, max_dims=self.max_dims) # min_dims, max_dims, num_lattice
-            self.L = self.L.to(device).float()
-
+        self.L = self.DE_ex.generate_mesh(num_lattice=num_lattice, min_dims=self.min_dims, max_dims=self.max_dims) # min_dims, max_dims, num_lattice
+        self.L = self.L.to(device).float()
         self.kwargs = kwargs
+
         if default_sampler == 'uniform':
             self.param_sampler = self.params_random
         elif default_sampler == 'extreme':
@@ -189,9 +196,7 @@ class SystemFamily():
         Generate model with params
         """
         kwargs = {**self.data_info, **kwargs}  # merge dictionaries
-        if self.data_name == 'grayscott':
-            model = self.DE(self.num_lattice, params=torch.tensor(params), **kwargs)
-        elif self.data_name == 'neural_ode':
+        if self.data_name == 'neural_ode':
             model = self.DE(params, **kwargs)
         else:
             model = self.DE(params=torch.tensor(params), **kwargs)

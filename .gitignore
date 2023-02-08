@@ -7,7 +7,10 @@ src/config.cfg
 *.pkl
 *.pyc
 *.sw*
-output/*
+data/*
+results/*
+runs/*
+models/*
 *.pt
 src/*/__pycache__/*
 notebooks/.ipynb_checkpoints/*

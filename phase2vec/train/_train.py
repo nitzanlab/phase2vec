@@ -17,6 +17,7 @@ def train_model(X_train, X_test,
                 batch_size=10,
                 beta=1e-3,
                 fp_normalize=False,
+                max_grad_norm=np.inf,
                 device='cuda',
                 log_dir='./runs',
                 log_period = 10):
@@ -45,6 +46,7 @@ def train_model(X_train, X_test,
                                batch_size=batch_size,
                                beta=beta,
                                fp_normalize=fp_normalize,
+                               max_grad_norm=max_grad_norm,
                                device=device,
                                AE=AE)
             
@@ -63,6 +65,7 @@ def run_epoch(data, labels, gt_pars, net, epoch, opt,
               batch_size=10,
               beta=1e-3,
               fp_normalize=False,
+              max_grad_norm=np.inf,
               device='cuda', 
               return_embeddings=False,
               AE=False):
@@ -104,7 +107,11 @@ def run_epoch(data, labels, gt_pars, net, epoch, opt,
         if not AE:
             # Reconstruction using fn dictionary
             pars = out.reshape(-1,library.shape[-1], dim)
-            recon = torch.einsum('sl,bld->bsd',library.to(device),pars).reshape(effective_batch_size, num_lattice,num_lattice,dim).permute(0,3,1,2)
+            # TODO: potential problem area!
+            #recon = torch.einsum('sl,bld->bsd',library.to(device),pars).reshape(effective_batch_size, num_lattice,num_lattice,dim).permute(0,3,1,2)
+            #recon = torch.einsum('sl,bld->bsd',library.to(device),pars).reshape(*batch.shape)
+            recon = torch.einsum('sl,bld->bsd',library.to(device),pars).reshape(effective_batch_size, num_lattice, num_lattice, num_lattice, dim).permute(0,4,1,2,3)
+
             par_loss = euclidean_loss(pars,batch_pars)
         else:
             recon = out.reshape(*batch.shape)
@@ -129,6 +136,7 @@ def run_epoch(data, labels, gt_pars, net, epoch, opt,
 
         if train:
             total_loss.backward()
+            norm = torch.nn.utils.clip_grad_norm(net.parameters(),max_grad_norm)
             opt.step()
         
         tloss_history.append(total_loss.detach().cpu().numpy())
