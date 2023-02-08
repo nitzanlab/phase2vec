@@ -108,9 +108,13 @@ def run_epoch(data, labels, gt_pars, net, epoch, opt,
             # Reconstruction using fn dictionary
             pars = out.reshape(-1,library.shape[-1], dim)
             # TODO: potential problem area!
-            #recon = torch.einsum('sl,bld->bsd',library.to(device),pars).reshape(effective_batch_size, num_lattice,num_lattice,dim).permute(0,3,1,2)
+            if dim == 2:
+                recon = torch.einsum('sl,bld->bsd',library.to(device),pars).reshape(effective_batch_size, num_lattice,num_lattice,dim).permute(0,3,1,2)
             #recon = torch.einsum('sl,bld->bsd',library.to(device),pars).reshape(*batch.shape)
-            recon = torch.einsum('sl,bld->bsd',library.to(device),pars).reshape(effective_batch_size, num_lattice, num_lattice, num_lattice, dim).permute(0,4,1,2,3)
+            elif dim ==3:
+                recon = torch.einsum('sl,bld->bsd',library.to(device),pars).reshape(effective_batch_size, num_lattice, num_lattice, num_lattice, dim).permute(0,4,1,2,3)
+            else:
+                raise ValueError('Dimension not supported!')
 
             par_loss = euclidean_loss(pars,batch_pars)
         else:
