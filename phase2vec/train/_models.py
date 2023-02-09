@@ -95,7 +95,7 @@ class CNNwFC_exp_emb(nn.Module):
         self.num_lattice = in_shape[1]
         self.latent_dim = latent_dim
 
-        encoder_model = CNN if self.dim == 0 else CNN_nd
+        encoder_model = CNN if self.dim == 2 else CNN_nd
         self.enc = encoder_model(in_shape, num_conv_layers=num_conv_layers,
                                  kernel_sizes=kernel_sizes, kernel_features=kernel_features,
                                  pooling_sizes = pooling_sizes,
