@@ -610,55 +610,115 @@ class AlonSystem(FlowSystemODE):
     """
     
     labels = ['X', 'c']
-    n_params = 6
+    n_params = 4
     params = torch.ones(n_params)
 
     min_dims = [-1.,-1.]
     max_dims = [1.,1.]
 
-    recommended_param_ranges = [[0, 1]] * n_params
+    recommended_param_ranges = (n_params) * [[0, 1]] 
     recommended_param_groups = [recommended_param_ranges]
-    eq_string = r'$\dot{x}_0=(%.02f \frac{3 * x_1^2}{x^2 + 1} - %.02f x_1) * x_0; \dot{x}_1=%.02f + %.02f x_0 - %.02f \frac{x_1^2}{x^2 + 1} * x_0 - %.02f x_1'
-    short_name='al'
+    eq_string = r'$\dot{c}=%.02f + %.02f c - %.02f \frac{c}{c^2 + 1} * X - %.02f c;\dot{X}=(\frac{3 c^2}{c^2 + 1} - c) * X$'
+    short_name = 'al'
 
-    def __init__(self, params=params, alpha0=1.0, beta2=1.0, beta3=1.0,
-                 gamma=5.0, labels=labels, min_dims=min_dims, max_dims=max_dims, **kwargs):
-            
+    def __init__(self, params=params, labels=labels, min_dims=min_dims, max_dims=max_dims, **kwargs):
         super().__init__(params=params, labels=labels, min_dims=min_dims, max_dims=max_dims, **kwargs)
+        self.foldc = 4
+        self.foldX = 8
+        self.shiftc = min(0, self.min_dims[0])
+        self.shiftX = min(0, self.min_dims[1])
 
-        if len(self.params) != AlonSystem.n_params:
-            ValueError('Alon System requires %d params' % AlonSystem.n_params)
-        if np.any(np.array(min_dims) < 0):
-            ValueError('Ligand and cell quantities are non-negative (min_dims is negative)')
-        self.alpha0 = alpha0
-        self.beta2 = beta2
-        self.beta3 = beta3
-        self.gamma = gamma
 
-    def proliferation(self, c):
+    def proliferation(self, c): # beta
         return 3.0 * c ** 2 / (c ** 2 + 1)
 
-    def removal(self, c):
+    def removal(self, c): # alpha
         return c
 
-    def uptake(self, c):
-        return c ** 2 / (c ** 2 + 1)
+    def uptake(self, c): # f
+        return c / (c + 1) 
+
 
     def forward(self, t, z, **kwargs):
         v = z[..., 0]
         w = z[..., 1]
 
-        X = (v + 1) * 10
-        c = (v + 1) * 5
+        c = (v - self.shiftc) * self.foldc
+        X = (w - self.shiftX) * self.foldX
 
-        Xdot = (self.params[0] * self.proliferation(c) - self.params[1] * self.removal(c)) * X
-        cdot = self.params[2] * self.beta3 + \
-               self.params[3] * self.beta2 * X - \
-               self.params[4] * self.alpha0 * self.uptake(c) * X - \
-               self.params[5] * self.gamma * c
-        zdot = torch.cat([Xdot.unsqueeze(-1), cdot.unsqueeze(-1)], dim=-1)
+        beta3 = self.params[0]
+        beta2 = self.params[1]
+        alpha0 = self.params[2]
+        gamma = self.params[3]
+        
+        Xdot = (self.proliferation(c) - self.removal(c)) * X
+        cdot = beta3 + \
+               beta2 * X - \
+               alpha0 * self.uptake(c) * X - \
+               gamma * c
+        Xdot[X <= self.shiftX / self.foldX] = 0
+        cdot[c <= self.shiftc / self.foldc] = 0
+    
+        zdot = torch.cat([cdot.unsqueeze(-1), Xdot.unsqueeze(-1)], dim=-1)
         return zdot
 
+    def get_critical_pts_original(self):
+        
+        c_sts = [0, 0.5*(3 - np.sqrt(5)), 0.5*(3 + np.sqrt(5))]
+
+        beta3 = self.params[0]
+        beta2 = self.params[1]
+        alpha0 = self.params[2]
+        gamma = self.params[3]
+    
+        pts = []
+        for c_st in c_sts:
+            X_st = ((beta3 - gamma*c_st) / (alpha0*self.uptake(c_st) - beta2)).numpy()
+            
+            # both X_st and c_st are nonnegative so clipping
+            if X_st < 0:
+                X_st = 0
+            if c_st < 0:
+                c_st = 0
+            
+            pts.append((c_st, X_st))
+        
+        c_st = (beta3 / gamma).numpy() 
+        X_st = 0
+        pts.append((c_st, X_st))
+
+        return pts
+
+    def get_critical_pts(self):
+
+        pts = self.get_critical_pts_original()
+        transc = lambda c: c / self.foldc + self.shiftc
+        transX = lambda X: X / self.foldX + self.shiftX
+        return [(transc(c), transX(X)) for c, X in pts]
+
+    def get_topology(self):
+        
+        pts = self.get_critical_pts_original()
+        beta3 = self.params[0]
+        beta2 = self.params[1]
+        alpha0 = self.params[2]
+        gamma = self.params[3]
+
+        der_proliferation = lambda c: 6*c / (c**4+2*c**2+1)
+        der_removal = lambda c: 1
+        der_uptake = lambda c: 1 / (c+1)**2
+        
+        J_func = lambda c, X: np.array([[ self.proliferation(c) - self.removal(c), (der_proliferation(c) - der_removal(c)) * X], \
+                                        [beta2 - alpha0 * self.uptake(c) , -alpha0*X*der_uptake(c) - gamma]])
+        topos = []
+        for c_st, X_st in pts:
+            
+            if X_st < np.inf:
+                J = J_func(c_st, X_st)
+                topos.append(get_topology_Jacobian(J))
+                
+        return topos
+    
 class LotkaVolterra(FlowSystemODE):
     labels = ['rabbit', 'lynx']
     n_params = 1

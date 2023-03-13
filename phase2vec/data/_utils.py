@@ -61,3 +61,54 @@ def laplacian(f):
     if num_dims>3:
         raise ValueError('Laplacian not yet implemented for dim>2.')
     return torch.stack([divergence(torch.stack(torch.gradient(f[:,i], dim=[1,2])).movedim(1,0)) for i in range(num_dims)]).movedim(1,0)
+
+
+
+topo_attractor = 1 # (1,0,0)
+topo_saddle = 2 # (0,1,0)
+topo_repeller = 3 # (0,0,1)
+topo_attr_spiral = 4
+topo_rep_spiral = 5
+topo_degenerate = 6
+topo_center = 7
+topo_line = 8
+
+def get_topology_Jacobian(A):
+    """
+    Given the Jacobian matrix A, return the topology of the fixed point.
+    """
+    tr = np.trace(A)
+    det = np.linalg.det(A)
+    delta = tr**2 - 4*det
+
+    if det < 0:
+        # Saddle
+        topo = topo_saddle #0
+    elif det > 0:
+            if tr > 0:
+                if det < delta:
+                    # Source
+                    topo = topo_repeller #1
+                elif det > delta:
+                    # Spiral source
+                    topo = topo_rep_spiral #2
+                else:
+                    # Degenerate source
+                    topo = topo_degenerate #-1
+            elif tr < 0:
+                if det < delta:
+                    # Sink
+                    topo = topo_attractor #3
+                elif det > delta:
+                    # Spiral sink
+                    topo = topo_attr_spiral #4
+                else:
+                    # Degenerate sink
+                    topo = topo_degenerate # -1
+            else:
+                # Center
+                topo = topo_center #-1
+    else:
+        # Line
+        topo = topo_line # -1
+    return topo
